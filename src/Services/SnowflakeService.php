@@ -22,6 +22,20 @@ class SnowflakeService
     private const CODE_SUCCESS = '090001';
     private const CODE_ASYNC = '333334';
 
+    /**
+     * Initialize the Snowflake API service
+     *
+     * @param string $baseUrl The base URL for the Snowflake API
+     * @param string $account The Snowflake account identifier
+     * @param string $user The Snowflake username
+     * @param string $publicKey The public key fingerprint
+     * @param string $privateKey The private key content (PEM format)
+     * @param string $privateKeyPassphrase The passphrase for the private key
+     * @param string $warehouse The Snowflake warehouse to use
+     * @param string $database The Snowflake database to use
+     * @param string $schema The Snowflake schema to use
+     * @param int $timeout Timeout in seconds for query execution
+     */
     public function __construct(
         private string $baseUrl,
         private string $account,
@@ -142,32 +156,32 @@ class SnowflakeService
         }
     }
 
+    /**
+     * Generate a Snowflake API access token using JWT
+     * 
+     * This method will:
+     * 1. Use the private key content provided in the constructor
+     * 2. Create a JWT with the appropriate claims
+     * 3. Sign it using RS256 algorithm
+     * 4. Return the serialized token
+     *
+     * @return string The JWT access token for Snowflake API
+     * @throws Exception If unable to generate the token
+     */
     private function getAccessToken(): string
     {
         Log::info('SnowflakeService: Generating access token');
 
         try {
-            // Check if we have a file path rather than actual key content
+            // Use the private key content directly
             $keyContent = $this->privateKey;
-            if (!str_starts_with($keyContent, '-----BEGIN')) {
-                if (file_exists($keyContent)) {
-                    Log::info('SnowflakeService: Loading private key from file', [
-                        'file' => $keyContent,
-                    ]);
-                    $keyContent = file_get_contents($keyContent);
-                    Log::info('SnowflakeService: Private key loaded from file', [
-                        'key_length' => strlen($keyContent),
-                    ]);
-                } else {
-                    Log::error('SnowflakeService: Private key file not found', [
-                        'file' => $keyContent,
-                    ]);
-                    throw new Exception("Private key file not found: {$keyContent}");
-                }
+            
+            if (empty($keyContent)) {
+                throw new Exception("Private key content is empty");
             }
-
+            
             Log::info('SnowflakeService: Creating JWK from private key');
-            $privateKey = JWKFactory::createFromKeyFile(
+            $privateKey = JWKFactory::createFromKey(
                 $keyContent,
                 $this->privateKeyPassphrase,
                 [
