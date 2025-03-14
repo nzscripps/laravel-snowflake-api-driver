@@ -180,6 +180,14 @@ class SnowflakeService
                 throw new Exception("Private key content is empty");
             }
             
+            // Replace literal '\n' sequences with actual newlines
+            $keyContent = str_replace('\n', "\n", $keyContent);
+            Log::info('SnowflakeService: Prepared private key content', [
+                'key_length' => strlen($keyContent),
+                'contains_begin' => str_contains($keyContent, '-----BEGIN'),
+                'contains_end' => str_contains($keyContent, '-----END'),
+            ]);
+            
             Log::info('SnowflakeService: Creating JWK from private key');
             $privateKey = JWKFactory::createFromKey(
                 $keyContent,
