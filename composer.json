@@ -1,5 +1,5 @@
 {
-    "name": "scripps/laravel-snowflake-api-driver",
+    "name": "nzscripps/laravel-snowflake-api-driver",
     "description": "Laravel Snowflake API driver for Eloquent",
     "type": "library",
     "require": {
