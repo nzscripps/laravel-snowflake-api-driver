@@ -168,8 +168,8 @@ class SnowflakeService
 
             Log::info('SnowflakeService: Creating JWK from private key');
             $privateKey = JWKFactory::createFromKeyFile(
-                resource_path('snowflake_private_key.p8'),
-                env('SNOWFLAKE_KEY_PHRASE'),
+                $keyContent,
+                $this->privateKeyPassphrase,
                 [
                     'use' => 'sig',
                     'alg' => 'RS256',
@@ -185,9 +185,17 @@ class SnowflakeService
                 ]
             );
             */
-            Log::info('SnowflakeService: JWK created successfully');
+            Log::info('SnowflakeService: JWK created successfully', [
+                'jwk_thumbprint' => $privateKey->get('kid', 'N/A'),
+                'jwk_alg' => $privateKey->get('alg', 'N/A'),
+            ]);
 
             $publicKeyFingerprint = 'SHA256:' . $this->publicKey;
+            Log::info('SnowflakeService: Using public key fingerprint', [
+                'raw_public_key' => $this->publicKey,
+                'fingerprint' => $publicKeyFingerprint,
+            ]);
+            
             $expires_in = time() + (60 * 60);
             $payload = [
                 'iss' => sprintf('SCRIPPS.%s.%s', $this->user, $publicKeyFingerprint),
@@ -199,7 +207,10 @@ class SnowflakeService
             Log::info('SnowflakeService: Creating JWT payload', [
                 'iss' => $payload['iss'],
                 'sub' => $payload['sub'],
+                'iat' => $payload['iat'],
+                'exp' => $payload['exp'],
                 'exp_in_seconds' => $expires_in - time(),
+                'publicKeyFingerprint' => $publicKeyFingerprint,
             ]);
 
             $algorithmManager = new AlgorithmManager([new RS256()]);
@@ -216,9 +227,28 @@ class SnowflakeService
             $serializer = new CompactSerializer();
             $access_token = $serializer->serialize($jws);
 
+            // Log the first and last 10 characters of the token for debugging
+            $token_start = substr($access_token, 0, 10);
+            $token_end = substr($access_token, -10);
+            $token_parts = explode('.', $access_token);
+            
             Log::info('SnowflakeService: Access token generated successfully', [
                 'token_length' => strlen($access_token),
+                'token_preview' => "{$token_start}...{$token_end}",
+                'token_parts_count' => count($token_parts),
+                'header_length' => strlen($token_parts[0] ?? ''),
+                'payload_length' => strlen($token_parts[1] ?? ''),
+                'signature_length' => strlen($token_parts[2] ?? ''),
             ]);
+
+            // Debug the headers for verification
+            if (isset($token_parts[0])) {
+                $header = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $token_parts[0])), true);
+                Log::info('SnowflakeService: JWT Header', [
+                    'alg' => $header['alg'] ?? 'unknown',
+                    'typ' => $header['typ'] ?? 'unknown',
+                ]);
+            }
 
             return $access_token;
         } catch (Exception $e) {
@@ -515,6 +545,12 @@ class SnowflakeService
         try {
             Log::info('SnowflakeService: Getting access token');
             $accessToken = $this->getAccessToken();
+            
+            // Log the full token in a safely printable format - ONLY FOR DEBUGGING
+            // This should be removed in production
+            Log::debug('SnowflakeService: Full JWT Token', [
+                'token' => $accessToken
+            ]);
 
             $headers = [
                 sprintf('Authorization: Bearer %s', $accessToken),
@@ -525,6 +561,7 @@ class SnowflakeService
 
             Log::info('SnowflakeService: Headers generated successfully', [
                 'header_count' => count($headers),
+                'authorization_prefix' => substr($headers[0], 0, 25) . '...',
             ]);
 
             return $headers;
