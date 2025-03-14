@@ -423,8 +423,43 @@ class SnowflakeService
             ]);
             Log::info('SnowflakeService: POST request for cancellation sent');
 
-            Log::info('SnowflakeService: Converting response to array and validating');
-            $this->hasResult($response->toArray(false), [self::CODE_SUCCESS]);
+            // Check the status code first
+            $statusCode = $response->getStatusCode();
+            
+            // Consider any 2xx status code as success for cancellation
+            if ($statusCode >= 200 && $statusCode < 300) {
+                Log::info('SnowflakeService: Cancellation successful based on status code', [
+                    'statusCode' => $statusCode
+                ]);
+                
+                // Try to get content, but don't fail if it's empty
+                try {
+                    $content = $response->getContent(false);
+                    
+                    if (!empty($content)) {
+                        Log::info('SnowflakeService: Converting response to array and validating');
+                        $responseData = json_decode($content, true);
+                        
+                        if (is_array($responseData) && isset($responseData['code'])) {
+                            $this->hasResult($responseData, [self::CODE_SUCCESS]);
+                        } else {
+                            Log::info('SnowflakeService: Response not in expected format, but status code indicates success');
+                        }
+                    } else {
+                        Log::info('SnowflakeService: Empty response body but status code indicates success');
+                    }
+                } catch (Exception $contentException) {
+                    // Log but don't throw - if status code was 2xx, we consider it a success
+                    Log::warning('SnowflakeService: Could not process response body, but status code indicates success', [
+                        'error' => $contentException->getMessage()
+                    ]);
+                }
+            } else {
+                Log::error('SnowflakeService: Cancellation failed with status code', [
+                    'statusCode' => $statusCode
+                ]);
+                throw new Exception("Failed to cancel statement, received status code: {$statusCode}");
+            }
 
             Log::info('SnowflakeService: Statement cancelled successfully');
         } catch (Exception $e) {
