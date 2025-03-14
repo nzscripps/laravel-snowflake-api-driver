@@ -175,20 +175,17 @@ class SnowflakeService
                     'alg' => 'RS256',
                 ]
             );
-            /*
-            $privateKey = \Jose\Component\KeyManagement\JWKFactory::createFromKeyFile(
-                resource_path('snowflake_private_key.p8'),
-                env('SNOWFLAKE_KEY_PHRASE'),
-                [
-                    'use' => 'sig',
-                    'alg' => 'RS256',
-                ]
-            );
-            */
-            Log::info('SnowflakeService: JWK created successfully', [
-                'jwk_thumbprint' => $privateKey->get('kid', 'N/A'),
-                'jwk_alg' => $privateKey->get('alg', 'N/A'),
+
+            // Log the complete JWK structure for debugging
+            Log::info('SnowflakeService: JWK details', [
+                'jwk_keys' => array_keys($privateKey->all()),
+                'jwk_values' => array_map(function($key) use ($privateKey) {
+                    // Only log non-sensitive keys
+                    return in_array($key, ['alg', 'use', 'kty']) ? $privateKey->get($key) : '[REDACTED]';
+                }, array_keys($privateKey->all()))
             ]);
+            
+            Log::info('SnowflakeService: JWK created successfully');
 
             $publicKeyFingerprint = 'SHA256:' . $this->publicKey;
             Log::info('SnowflakeService: Using public key fingerprint', [
@@ -198,8 +195,8 @@ class SnowflakeService
             
             $expires_in = time() + (60 * 60);
             $payload = [
-                'iss' => sprintf('SCRIPPS.%s.%s', $this->user, $publicKeyFingerprint),
-                'sub' => sprintf('SCRIPPS.%s', $this->user),
+                'iss' => sprintf('%s.%s', $this->user, $publicKeyFingerprint),
+                'sub' => $this->user,
                 'iat' => time(),
                 'exp' => $expires_in,
             ];
@@ -211,6 +208,7 @@ class SnowflakeService
                 'exp' => $payload['exp'],
                 'exp_in_seconds' => $expires_in - time(),
                 'publicKeyFingerprint' => $publicKeyFingerprint,
+                'raw_payload' => json_encode($payload),
             ]);
 
             $algorithmManager = new AlgorithmManager([new RS256()]);
@@ -629,6 +627,8 @@ class SnowflakeService
                 Log::error('SnowflakeService: HTTP error response', [
                     'status_code' => $statusCode,
                     'message' => $content["message"] ?? 'no-message',
+                    'error_details' => $content["data"] ?? [],
+                    'full_response' => $content,
                 ]);
                 throw new Exception(sprintf('Snowflake error, %s returned with message: %s', $statusCode, $content["message"] ?? 'Unknown error'), $statusCode);
             }
