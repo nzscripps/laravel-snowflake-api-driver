@@ -56,10 +56,6 @@ class QueryGrammar extends Grammar
             return substr($value, 4);
         }
 
-        if (method_exists($this, 'isExpression') && $this->isExpression($value)) {
-            $value = $this->getValue($value);
-        }
-
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
             $value = Str::upper($value);
         }
