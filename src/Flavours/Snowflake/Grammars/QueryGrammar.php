@@ -56,7 +56,7 @@ class QueryGrammar extends Grammar
             return substr($value, 4);
         }
 
-        if (method_exists($this, 'isExpression') && $this->isExpression($column)) {
+        if (method_exists($this, 'isExpression') && $this->isExpression($value)) {
             $value = $this->getValue($value);
         }
 
@@ -112,7 +112,7 @@ class QueryGrammar extends Grammar
      */
     public function wrapTable($table)
     {
-        if (method_exists($this, 'isExpression') && $this->isExpression($column)) {
+        if (method_exists($this, 'isExpression') && $this->isExpression($table)) {
             $table = $this->getValue($table);
         }
 
