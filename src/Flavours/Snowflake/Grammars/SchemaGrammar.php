@@ -7,9 +7,12 @@ use Illuminate\Support\Fluent;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Grammars\Grammar;
+use LaravelSnowflakeApi\Traits\DebugLogging;
 
 class SchemaGrammar extends Grammar
 {
+    use DebugLogging;
+
     /**
      * The possible column modifiers.
      *
@@ -160,14 +163,12 @@ class SchemaGrammar extends Grammar
      */
     public function wrapTable($table)
     {
-        Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
-        $table = parent::wrapTable($table);
-
+        $this->debugLog('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
             $table = Str::upper($table);
         }
 
-        return $table;
+        return parent::wrapTable($table);
     }
 
     /**

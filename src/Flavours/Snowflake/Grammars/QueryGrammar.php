@@ -3,14 +3,18 @@ namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Expression;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Query\Grammars\Grammar;
 use Illuminate\Database\Schema\ColumnDefinition;
+use LaravelSnowflakeApi\Traits\DebugLogging;
 
 class QueryGrammar extends Grammar
 {
+    use DebugLogging;
+
     /**
      * The components that make up a select clause.
      *
@@ -39,7 +43,7 @@ class QueryGrammar extends Grammar
      */
     public function compileSelect(Builder $query)
     {
-        Log::info('Compile Select', ['file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('Compile Select', ['file' => __FILE__, 'line' => __LINE__]);
         return parent::compileSelect($query);
     }
 
@@ -50,7 +54,7 @@ class QueryGrammar extends Grammar
      */
     public function columnize(array $columns)
     {
-        Log::info('columnize', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('columnize', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
         return implode(', ', array_map([$this, 'wrapColumn'], $columns));
     }
 
@@ -63,7 +67,7 @@ class QueryGrammar extends Grammar
      */
     public function wrapTable($table)
     {
-        Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         if (method_exists($this, 'isExpression') && !$this->isExpression($table)) {
             $table = $this->preWrapTable($table);
             return $this->wrap($this->tablePrefix . $table);
@@ -95,10 +99,9 @@ class QueryGrammar extends Grammar
      */
     public function getValue($expression)
     {
-        Log::info('getValue', ['expression' => $expression, 'file' => __FILE__, 'line' => __LINE__]);
-        // $return = ($expression instanceof Illuminate\Contracts\Database\Query\Expression ? $expression->getValue($this) : $expression);
+        $this->debugLog('getValue', ['expression' => $expression, 'file' => __FILE__, 'line' => __LINE__]);
         $return = $expression->getValue($this);
-        Log::info('display Return', ['return' => $return, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('display Return', ['return' => $return, 'file' => __FILE__, 'line' => __LINE__]);
         return $return;
     }
 
@@ -111,11 +114,10 @@ class QueryGrammar extends Grammar
      */
     protected function wrapSegments($segments)
     {
-        Log::info('wrapSegments', ['segments' => $segments, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('wrapSegments', ['segments' => $segments, 'file' => __FILE__, 'line' => __LINE__]);
         return collect($segments)->map(function ($segment, $key) use ($segments) {
             return 0 === $key && count($segments) > 1
                 ? $this->wrapTable($segment)
-                // Original ->wraValue, but this is always called for columns segments
                 : $this->wrapColumn($segment);
         })->implode('.');
     }
@@ -129,7 +131,7 @@ class QueryGrammar extends Grammar
      */
     protected function wrapColumn($column)
     {
-        Log::info('wrapColumn', ['column' => $column, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('wrapColumn', ['column' => $column, 'file' => __FILE__, 'line' => __LINE__]);
         if (method_exists($this, 'isExpression') && $this->isExpression($column)) {
             return $this->getValue($column);
         }
@@ -154,7 +156,7 @@ class QueryGrammar extends Grammar
      */
     protected function wrapValue($value)
     {
-        Log::info('wrapValue', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('wrapValue', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
         if ('*' !== $value) {
             return "'".str_replace("'", "''", $value)."'";
         }
@@ -171,7 +173,7 @@ class QueryGrammar extends Grammar
      */
     protected function compileLimit(Builder $query, $limit)
     {
-        Log::info('compileLimit', ['limit' => $limit, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('compileLimit', ['limit' => $limit, 'file' => __FILE__, 'line' => __LINE__]);
         return 'limit ' . $limit;
     }
 
@@ -184,7 +186,7 @@ class QueryGrammar extends Grammar
      */
     protected function compileOffset(Builder $query, $offset)
     {
-        Log::info('compileOffset', ['offset' => $offset, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('compileOffset', ['offset' => $offset, 'file' => __FILE__, 'line' => __LINE__]);
         return 'offset ' . $offset;
     }
 
@@ -197,32 +199,12 @@ class QueryGrammar extends Grammar
      */
     protected function compileLock(Builder $query, $value)
     {
-        Log::info('compileLock', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('compileLock', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
         // Snowflake doesn't support table locking
         return '';
     }
 
-    // /**
-    //  * Wrap a table in keyword identifiers.
-    //  *
-    //  * @param  string  $table
-    //  * @return string
-    //  */
-    // public function wrapTable($table)
-    // {
-    //     if (method_exists($this, 'isExpression') && $this->isExpression($table)) {
-    //         $table = $this->getValue($table);
-    //     }
-
-    //     Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
-    //     if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
-    //         $table = Str::upper($table);
-    //     }
-
-    //     return parent::wrapTable($table);
-    // }
-
-        /**
+    /**
      * Wrap a union subquery in parentheses.
      *
      * @param string $sql
@@ -231,10 +213,9 @@ class QueryGrammar extends Grammar
      */
     protected function wrapUnion($sql)
     {
-        Log::info('wrapUnion', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('wrapUnion', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
         return 'select * from ('.$sql.')';
     }
-
 
     /**
      * Escapes a value for safe SQL embedding.
@@ -245,7 +226,7 @@ class QueryGrammar extends Grammar
      */
     public function escape($value, $binary = false)
     {
-        Log::info('escape', ['value' => $value, 'binary' => $binary, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('escape', ['value' => $value, 'binary' => $binary, 'file' => __FILE__, 'line' => __LINE__]);
         return DB::connection()->getPdo()->quote($value);
     }
 }
