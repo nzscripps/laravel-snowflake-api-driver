@@ -4,6 +4,7 @@ namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\Query\Expression;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Query\Grammars\Grammar;
 use Illuminate\Database\Schema\ColumnDefinition;
@@ -38,6 +39,7 @@ class QueryGrammar extends Grammar
      */
     public function compileSelect(Builder $query)
     {
+        Log::info('Compile Select', ['file' => __FILE__, 'line' => __LINE__]);
         return parent::compileSelect($query);
     }
 
@@ -48,6 +50,7 @@ class QueryGrammar extends Grammar
      */
     public function columnize(array $columns)
     {
+        Log::info('columnize', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
         return implode(', ', array_map([$this, 'wrapColumn'], $columns));
     }
 
@@ -60,6 +63,7 @@ class QueryGrammar extends Grammar
      */
     public function wrapTable($table)
     {
+        Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         if (method_exists($this, 'isExpression') && !$this->isExpression($table)) {
             $table = $this->preWrapTable($table);
             return $this->wrap($this->tablePrefix . $table);
@@ -70,6 +74,7 @@ class QueryGrammar extends Grammar
 
     public static function preWrapTable($tableName)
     {
+        Log::info('preWrapTable', ['tableName' => $tableName, 'file' => __FILE__, 'line' => __LINE__]);
         if ($tableName instanceof Blueprint) {
             $tableName = $tableName->getTable();
         }
@@ -90,7 +95,11 @@ class QueryGrammar extends Grammar
      */
     public function getValue($expression)
     {
-        return $expression instanceof Expression ? $expression->getValue($this) : $expression;
+        Log::info('getValue', ['expression' => $expression, 'file' => __FILE__, 'line' => __LINE__]);
+        // $return = ($expression instanceof Illuminate\Contracts\Database\Query\Expression ? $expression->getValue($this) : $expression);
+        $return = $expression->getValue($this);
+        Log::info('display Return', ['return' => $return, 'file' => __FILE__, 'line' => __LINE__]);
+        return $return;
     }
 
     /**
@@ -102,6 +111,7 @@ class QueryGrammar extends Grammar
      */
     protected function wrapSegments($segments)
     {
+        Log::info('wrapSegments', ['segments' => $segments, 'file' => __FILE__, 'line' => __LINE__]);
         return collect($segments)->map(function ($segment, $key) use ($segments) {
             return 0 === $key && count($segments) > 1
                 ? $this->wrapTable($segment)
@@ -119,7 +129,7 @@ class QueryGrammar extends Grammar
      */
     protected function wrapColumn($column)
     {
-
+        Log::info('wrapColumn', ['column' => $column, 'file' => __FILE__, 'line' => __LINE__]);
         if (method_exists($this, 'isExpression') && $this->isExpression($column)) {
             return $this->getValue($column);
         }
@@ -144,6 +154,7 @@ class QueryGrammar extends Grammar
      */
     protected function wrapValue($value)
     {
+        Log::info('wrapValue', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
         if ('*' !== $value) {
             return "'".str_replace("'", "''", $value)."'";
         }
@@ -160,34 +171,8 @@ class QueryGrammar extends Grammar
      */
     protected function compileLimit(Builder $query, $limit)
     {
+        Log::info('compileLimit', ['limit' => $limit, 'file' => __FILE__, 'line' => __LINE__]);
         return 'limit ' . $limit;
-    }
-
-
-
-    /**
-     * Wrap a single string in keyword identifiers.
-     *
-     * @param string | \Illuminate\Database\Query\Expression $column
-     *
-     * @return string
-     */
-    protected function wrapColumn($column)
-    {
-
-        if (method_exists($this, 'isExpression') && $this->isExpression($column)) {
-            return $this->getValue($column);
-        }
-
-        if ($column instanceof ColumnDefinition) {
-            $column = $column->get('name');
-        }
-
-        if ('*' !== $column) {
-            return str_replace('"', '', $column);
-        }
-
-        return $column;
     }
 
     /**
@@ -199,6 +184,7 @@ class QueryGrammar extends Grammar
      */
     protected function compileOffset(Builder $query, $offset)
     {
+        Log::info('compileOffset', ['offset' => $offset, 'file' => __FILE__, 'line' => __LINE__]);
         return 'offset ' . $offset;
     }
 
@@ -211,29 +197,30 @@ class QueryGrammar extends Grammar
      */
     protected function compileLock(Builder $query, $value)
     {
+        Log::info('compileLock', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
         // Snowflake doesn't support table locking
         return '';
     }
 
-    /**
-     * Wrap a table in keyword identifiers.
-     *
-     * @param  string  $table
-     * @return string
-     */
-    public function wrapTable($table)
-    {
-        if (method_exists($this, 'isExpression') && $this->isExpression($table)) {
-            $table = $this->getValue($table);
-        }
+    // /**
+    //  * Wrap a table in keyword identifiers.
+    //  *
+    //  * @param  string  $table
+    //  * @return string
+    //  */
+    // public function wrapTable($table)
+    // {
+    //     if (method_exists($this, 'isExpression') && $this->isExpression($table)) {
+    //         $table = $this->getValue($table);
+    //     }
 
-        Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
-        if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
-            $table = Str::upper($table);
-        }
+    //     Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
+    //     if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
+    //         $table = Str::upper($table);
+    //     }
 
-        return parent::wrapTable($table);
-    }
+    //     return parent::wrapTable($table);
+    // }
 
         /**
      * Wrap a union subquery in parentheses.
@@ -244,6 +231,7 @@ class QueryGrammar extends Grammar
      */
     protected function wrapUnion($sql)
     {
+        Log::info('wrapUnion', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
         return 'select * from ('.$sql.')';
     }
 
@@ -257,6 +245,7 @@ class QueryGrammar extends Grammar
      */
     public function escape($value, $binary = false)
     {
+        Log::info('escape', ['value' => $value, 'binary' => $binary, 'file' => __FILE__, 'line' => __LINE__]);
         return DB::connection()->getPdo()->quote($value);
     }
 }
