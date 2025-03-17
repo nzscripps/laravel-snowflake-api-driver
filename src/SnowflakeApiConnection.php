@@ -8,6 +8,7 @@ use LaravelSnowflakeApi\Services\SnowflakeService;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\SchemaGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Processor as SnowflakeProcessor;
+use LaravelSnowflakeApi\Traits\DebugLogging;
 use Illuminate\Support\Facades\Log;
 use PDO;
 use Closure;
@@ -15,6 +16,8 @@ use Exception;
 
 class SnowflakeApiConnection extends Connection
 {
+    use DebugLogging;
+
     /**
      * @var SnowflakeService
      */
@@ -31,7 +34,7 @@ class SnowflakeApiConnection extends Connection
      */
     public function __construct($pdo, $database = '', $tablePrefix = '', array $config = [])
     {
-        Log::info('SnowflakeApiConnection: Initializing with config', [
+        $this->debugLog('SnowflakeApiConnection: Initializing with config', [
             'database' => $database,
             'prefix' => $tablePrefix,
             'config_keys' => array_keys($config),
@@ -46,7 +49,7 @@ class SnowflakeApiConnection extends Connection
             if (isset($logConfig['private_key_passphrase'])) $logConfig['private_key_passphrase'] = 'REDACTED';
             if (isset($logConfig['password'])) $logConfig['password'] = 'REDACTED';
 
-            Log::info('SnowflakeApiConnection: Creating SnowflakeService with configuration', $logConfig);
+            $this->debugLog('SnowflakeApiConnection: Creating SnowflakeService with configuration', $logConfig);
 
             // Instantiate the SnowflakeService
             $this->snowflakeService = new SnowflakeService(
@@ -62,12 +65,12 @@ class SnowflakeApiConnection extends Connection
                 $config['timeout'] ?? 30
             );
 
-            Log::info('SnowflakeApiConnection: SnowflakeService created successfully');
+            $this->debugLog('SnowflakeApiConnection: SnowflakeService created successfully');
 
             // Test the connection
             try {
                 $this->snowflakeService->testConnection();
-                Log::info('SnowflakeApiConnection: Connection test successful');
+                $this->debugLog('SnowflakeApiConnection: Connection test successful');
             } catch (Exception $e) {
                 Log::error('SnowflakeApiConnection: Connection test failed', [
                     'error' => $e->getMessage(),
@@ -91,7 +94,7 @@ class SnowflakeApiConnection extends Connection
      */
     protected function getDefaultQueryGrammar()
     {
-        Log::info('SnowflakeApiConnection: Getting default query grammar');
+        $this->debugLog('SnowflakeApiConnection: Getting default query grammar');
         return $this->withTablePrefix(new QueryGrammar);
     }
 
@@ -102,7 +105,7 @@ class SnowflakeApiConnection extends Connection
      */
     protected function getDefaultSchemaGrammar()
     {
-        Log::info('SnowflakeApiConnection: Getting default schema grammar');
+        $this->debugLog('SnowflakeApiConnection: Getting default schema grammar');
         return $this->withTablePrefix(new SchemaGrammar);
     }
 
@@ -113,7 +116,7 @@ class SnowflakeApiConnection extends Connection
      */
     protected function getDefaultPostProcessor()
     {
-        Log::info('SnowflakeApiConnection: Getting default post processor');
+        $this->debugLog('SnowflakeApiConnection: Getting default post processor');
         return new SnowflakeProcessor;
     }
 
@@ -127,7 +130,7 @@ class SnowflakeApiConnection extends Connection
      */
     public function select($query, $bindings = [], $useReadPdo = true)
     {
-        Log::info('SnowflakeApiConnection: Executing select query', [
+        $this->debugLog('SnowflakeApiConnection: Executing select query', [
             'query' => $query,
             'bindings_count' => count($bindings),
             'useReadPdo' => $useReadPdo
@@ -135,28 +138,28 @@ class SnowflakeApiConnection extends Connection
 
         return $this->run($query, $bindings, function ($query, $bindings) {
             if ($this->pretending()) {
-                Log::info('SnowflakeApiConnection: Pretending to run query');
+                $this->debugLog('SnowflakeApiConnection: Pretending to run query');
                 return [];
             }
 
             try {
                 // Execute query using the Snowflake API Service
-                Log::info('SnowflakeApiConnection: Preparing query for execution');
+                $this->debugLog('SnowflakeApiConnection: Preparing query for execution');
                 $statement = $this->prepareQuery($query, $bindings);
 
-                Log::info('SnowflakeApiConnection: Executing query via SnowflakeService', [
+                $this->debugLog('SnowflakeApiConnection: Executing query via SnowflakeService', [
                     'prepared_query' => $statement
                 ]);
 
                 $result = $this->snowflakeService->ExecuteQuery($statement);
 
-                Log::info('SnowflakeApiConnection: Query executed successfully', [
+                $this->debugLog('SnowflakeApiConnection: Query executed successfully', [
                     'result_count' => is_countable($result) ? count($result) : 'non-countable'
                 ]);
 
                 $array = $result->toArray();
 
-                Log::info('SnowflakeApiConnection: Converted result to array', [
+                $this->debugLog('SnowflakeApiConnection: Converted result to array', [
                     'array_count' => count($array)
                 ]);
 
@@ -181,7 +184,7 @@ class SnowflakeApiConnection extends Connection
      */
     private function prepareQuery($query, array $bindings = [])
     {
-        Log::info('SnowflakeApiConnection: Preparing query', [
+        $this->debugLog('SnowflakeApiConnection: Preparing query', [
             'original_query' => $query,
             'bindings_count' => count($bindings)
         ]);
@@ -189,7 +192,7 @@ class SnowflakeApiConnection extends Connection
         try {
             $query = $this->replaceBindings($query, $bindings);
 
-            Log::info('SnowflakeApiConnection: Query prepared successfully', [
+            $this->debugLog('SnowflakeApiConnection: Query prepared successfully', [
                 'prepared_query' => $query
             ]);
 
@@ -213,13 +216,13 @@ class SnowflakeApiConnection extends Connection
      */
     private function replaceBindings($query, array $bindings = [])
     {
-        Log::info('SnowflakeApiConnection: Replacing bindings', [
+        $this->debugLog('SnowflakeApiConnection: Replacing bindings', [
             'query' => $query,
             'bindings_count' => count($bindings)
         ]);
 
         if (empty($bindings)) {
-            Log::info('SnowflakeApiConnection: No bindings to replace');
+            $this->debugLog('SnowflakeApiConnection: No bindings to replace');
             return $query;
         }
 
@@ -228,7 +231,7 @@ class SnowflakeApiConnection extends Connection
             $result = preg_replace_callback('/\?/', function () use ($bindings, &$bindingIndex) {
                 $value = $bindings[$bindingIndex++] ?? '';
 
-                Log::info('SnowflakeApiConnection: Replacing binding', [
+                $this->debugLog('SnowflakeApiConnection: Replacing binding', [
                     'index' => $bindingIndex - 1,
                     'value_type' => gettype($value)
                 ]);
@@ -244,7 +247,7 @@ class SnowflakeApiConnection extends Connection
                 return $value;
             }, $query);
 
-            Log::info('SnowflakeApiConnection: Bindings replaced successfully', [
+            $this->debugLog('SnowflakeApiConnection: Bindings replaced successfully', [
                 'result_query' => $result
             ]);
 
@@ -268,21 +271,21 @@ class SnowflakeApiConnection extends Connection
      */
     public function statement($query, $bindings = [])
     {
-        Log::info('SnowflakeApiConnection: Executing statement', [
+        $this->debugLog('SnowflakeApiConnection: Executing statement', [
             'query' => $query,
             'bindings_count' => count($bindings)
         ]);
 
         return $this->run($query, $bindings, function ($query, $bindings) {
             if ($this->pretending()) {
-                Log::info('SnowflakeApiConnection: Pretending to run statement');
+                $this->debugLog('SnowflakeApiConnection: Pretending to run statement');
                 return 0;
             }
 
             try {
                 $statement = $this->prepareQuery($query, $bindings);
 
-                Log::info('SnowflakeApiConnection: Executing statement via SnowflakeService', [
+                $this->debugLog('SnowflakeApiConnection: Executing statement via SnowflakeService', [
                     'prepared_query' => $statement
                 ]);
 
@@ -290,7 +293,7 @@ class SnowflakeApiConnection extends Connection
 
                 $count = $result->count();
 
-                Log::info('SnowflakeApiConnection: Statement executed successfully', [
+                $this->debugLog('SnowflakeApiConnection: Statement executed successfully', [
                     'affected_rows' => $count
                 ]);
 
@@ -315,7 +318,7 @@ class SnowflakeApiConnection extends Connection
      */
     public function insert($query, $bindings = [])
     {
-        Log::info('SnowflakeApiConnection: Executing insert statement', [
+        $this->debugLog('SnowflakeApiConnection: Executing insert statement', [
             'query' => $query,
             'bindings_count' => count($bindings)
         ]);
@@ -323,7 +326,7 @@ class SnowflakeApiConnection extends Connection
         try {
             $result = $this->statement($query, $bindings) > 0;
 
-            Log::info('SnowflakeApiConnection: Insert statement executed', [
+            $this->debugLog('SnowflakeApiConnection: Insert statement executed', [
                 'result' => $result
             ]);
 
@@ -347,7 +350,7 @@ class SnowflakeApiConnection extends Connection
      */
     public function update($query, $bindings = [])
     {
-        Log::info('SnowflakeApiConnection: Executing update statement', [
+        $this->debugLog('SnowflakeApiConnection: Executing update statement', [
             'query' => $query,
             'bindings_count' => count($bindings)
         ]);
@@ -355,7 +358,7 @@ class SnowflakeApiConnection extends Connection
         try {
             $result = $this->statement($query, $bindings);
 
-            Log::info('SnowflakeApiConnection: Update statement executed', [
+            $this->debugLog('SnowflakeApiConnection: Update statement executed', [
                 'affected_rows' => $result
             ]);
 
@@ -379,7 +382,7 @@ class SnowflakeApiConnection extends Connection
      */
     public function delete($query, $bindings = [])
     {
-        Log::info('SnowflakeApiConnection: Executing delete statement', [
+        $this->debugLog('SnowflakeApiConnection: Executing delete statement', [
             'query' => $query,
             'bindings_count' => count($bindings)
         ]);
@@ -387,7 +390,7 @@ class SnowflakeApiConnection extends Connection
         try {
             $result = $this->statement($query, $bindings);
 
-            Log::info('SnowflakeApiConnection: Delete statement executed', [
+            $this->debugLog('SnowflakeApiConnection: Delete statement executed', [
                 'affected_rows' => $result
             ]);
 
