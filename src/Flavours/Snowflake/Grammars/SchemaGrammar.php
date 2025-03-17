@@ -2,10 +2,11 @@
 
 namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 
-use Illuminate\Database\Schema\Grammars\Grammar;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Fluent;
 use Illuminate\Support\Str;
+use Illuminate\Support\Fluent;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Database\Schema\Grammars\Grammar;
 
 class SchemaGrammar extends Grammar
 {
@@ -159,6 +160,7 @@ class SchemaGrammar extends Grammar
      */
     public function wrapTable($table)
     {
+        Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         $table = parent::wrapTable($table);
 
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {

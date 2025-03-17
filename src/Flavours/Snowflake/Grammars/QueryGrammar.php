@@ -2,9 +2,10 @@
 
 namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Grammars\Grammar;
-use Illuminate\Support\Str;
 
 class QueryGrammar extends Grammar
 {
@@ -108,6 +109,7 @@ class QueryGrammar extends Grammar
      */
     public function wrapTable($table)
     {
+        Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
             $table = Str::upper($table);
         }

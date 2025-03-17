@@ -3,6 +3,7 @@
 namespace LaravelSnowflakeApi\Flavours\Snowflake;
 
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Query\Processors\Processor as BaseProcessor;
@@ -11,6 +12,7 @@ class Processor extends BaseProcessor
 {
     public static function wrapTable($tableName)
     {
+        Log::info('wrapTable', ['tableName' => $tableName, 'file' => __FILE__, 'line' => __LINE__]);
         if ($tableName instanceof Blueprint) {
             $tableName = $tableName->getTable();
         }
