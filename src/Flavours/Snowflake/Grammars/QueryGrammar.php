@@ -45,22 +45,37 @@ class QueryGrammar extends Grammar
      * @param  string  $value
      * @return string
      */
+    // protected function wrapValue($value)
+    // {
+    //     if ('*' === $value) {
+    //         return $value;
+    //     }
+
+    //     // If the value is actually a raw expression, we'll just return it as-is.
+    //     if (strpos($value, 'raw:') === 0) {
+    //         return substr($value, 4);
+    //     }
+
+    //     if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
+    //         $value = Str::upper($value);
+    //     }
+
+    //     return '"' . str_replace('"', '""', $value) . '"';
+    // }
+        /**
+     * Wrap a single string in keypublic function wrapTable($table)word identifiers.
+     *
+     * @param string $value
+     *
+     * @return string
+     */
     protected function wrapValue($value)
     {
-        if ('*' === $value) {
-            return $value;
+        if ('*' !== $value) {
+            return "'".str_replace("'", "''", $value)."'";
         }
 
-        // If the value is actually a raw expression, we'll just return it as-is.
-        if (strpos($value, 'raw:') === 0) {
-            return substr($value, 4);
-        }
-
-        if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
-            $value = Str::upper($value);
-        }
-
-        return '"' . str_replace('"', '""', $value) . '"';
+        return $value;
     }
 
     /**
@@ -75,6 +90,34 @@ class QueryGrammar extends Grammar
         return 'limit ' . $limit;
     }
 
+
+
+    /**
+     * Wrap a single string in keyword identifiers.
+     *
+     * @param string | \Illuminate\Database\Query\Expression $column
+     *
+     * @return string
+     */
+    protected function wrapColumn($column)
+    {
+
+        if (method_exists($this, 'isExpression') && $this->isExpression($column)) {
+            return $this->getValue($column);
+        }
+
+        if ($column instanceof ColumnDefinition) {
+            $column = $column->get('name');
+        }
+
+        if ('*' !== $column) {
+            return str_replace('"', '', $column);
+        }
+
+        return $column;
+    }
+
+    `
     /**
      * Compile the "offset" portions of the query.
      *
