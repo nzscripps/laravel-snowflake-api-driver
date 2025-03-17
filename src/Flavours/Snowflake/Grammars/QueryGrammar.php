@@ -1,11 +1,10 @@
 <?php
-
 namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Grammars\Grammar;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class QueryGrammar extends Grammar
 {
@@ -48,13 +47,17 @@ class QueryGrammar extends Grammar
      */
     protected function wrapValue($value)
     {
-        if ($value === '*') {
+        if ('*' === $value) {
             return $value;
         }
 
         // If the value is actually a raw expression, we'll just return it as-is.
         if (strpos($value, 'raw:') === 0) {
             return substr($value, 4);
+        }
+
+        if (method_exists($this, 'isExpression') && $this->isExpression($column)) {
+            $value = $this->getValue($value);
         }
 
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
@@ -109,6 +112,10 @@ class QueryGrammar extends Grammar
      */
     public function wrapTable($table)
     {
+        if (method_exists($this, 'isExpression') && $this->isExpression($column)) {
+            $table = $this->getValue($table);
+        }
+
         Log::info('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
             $table = Str::upper($table);
