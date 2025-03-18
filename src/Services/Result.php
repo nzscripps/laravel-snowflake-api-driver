@@ -181,7 +181,14 @@ class Result
             $associativeRow = [];
             foreach ($this->fields as $index => $field) {
                 $columnName = $field['name'] ?? "column_$index";
-                $associativeRow[$columnName] = $row[$index] ?? null;
+                $value = $row[$index] ?? null;
+                
+                // Handle case where value is wrapped in an "Item" object
+                if (is_array($value) && count($value) === 1 && isset($value['Item'])) {
+                    $value = $value['Item'];
+                }
+                
+                $associativeRow[$columnName] = $value;
             }
             $result[] = $associativeRow;
         }
