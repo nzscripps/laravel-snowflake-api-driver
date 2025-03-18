@@ -176,9 +176,10 @@ class Result
         
         $result = [];
         
-        // Transform data to use column names as keys
+        // Transform data to use column names as keys and convert to objects
         foreach ($this->data as $row) {
-            $associativeRow = [];
+            $rowData = new \stdClass();
+            
             foreach ($this->fields as $index => $field) {
                 $columnName = $field['name'] ?? "column_$index";
                 $value = $row[$index] ?? null;
@@ -188,12 +189,13 @@ class Result
                     $value = $value['Item'];
                 }
                 
-                $associativeRow[$columnName] = $value;
+                $rowData->$columnName = $value;
             }
-            $result[] = $associativeRow;
+            
+            $result[] = $rowData;
         }
         
-        $this->debugLog('Result: Transformed data to associative array', [
+        $this->debugLog('Result: Transformed data to Eloquent-compatible format', [
             'result_count' => count($result)
         ]);
         
