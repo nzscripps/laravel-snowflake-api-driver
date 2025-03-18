@@ -78,7 +78,7 @@ class QueryGrammar extends Grammar
 
     public static function preWrapTable($tableName)
     {
-        Log::info('preWrapTable', ['tableName' => $tableName, 'file' => __FILE__, 'line' => __LINE__]);
+        self::debugLog('preWrapTable', ['tableName' => $tableName, 'file' => __FILE__, 'line' => __LINE__]);
         if ($tableName instanceof Blueprint) {
             $tableName = $tableName->getTable();
         }
