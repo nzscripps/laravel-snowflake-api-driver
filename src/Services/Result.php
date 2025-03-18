@@ -170,9 +170,27 @@ class Result
     public function toArray()
     {
         $this->debugLog('Result: Converting to array', [
-            'data_count' => count($this->data)
+            'data_count' => count($this->data),
+            'fields_count' => count($this->fields)
         ]);
-        return $this->data;
+        
+        $result = [];
+        
+        // Transform data to use column names as keys
+        foreach ($this->data as $row) {
+            $associativeRow = [];
+            foreach ($this->fields as $index => $field) {
+                $columnName = $field['name'] ?? "column_$index";
+                $associativeRow[$columnName] = $row[$index] ?? null;
+            }
+            $result[] = $associativeRow;
+        }
+        
+        $this->debugLog('Result: Transformed data to associative array', [
+            'result_count' => count($result)
+        ]);
+        
+        return $result;
     }
 
     /**
@@ -194,9 +212,7 @@ class Result
      */
     public function toCollection()
     {
-        $this->debugLog('Result: Converting to collection', [
-            'data_count' => count($this->data)
-        ]);
-        return new Collection($this->data);
+        $this->debugLog('Result: Converting to collection');
+        return new Collection($this->toArray());
     }
 }
