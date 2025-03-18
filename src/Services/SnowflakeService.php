@@ -124,24 +124,21 @@ class SnowflakeService
                 ]);
             }
 
-            $data = $result->getData();
-            $this->debugLog('SnowflakeService: Initial data received', [
-                'count' => count($data),
-            ]);
-
-            $pageNumber = 1;
-            while ($result->getPaginationNext()) {
-                $pageNumber++;
-                $this->debugLog('SnowflakeService: Retrieving additional page', [
-                    'page' => $pageNumber,
-                ]);
-                $newData = $result->getData();
-                $this->debugLog('SnowflakeService: Additional data retrieved', [
-                    'page' => $pageNumber,
-                    'count' => count($newData),
-                ]);
-                $data = array_merge($data, $newData);
+            // Process result once all pages have been collected
+            if ($result->getPageTotal() > 1) {
+                $this->debugLog('SnowflakeService: Multiple pages detected, retrieving all pages');
+                $pageNumber = 1;
+                while ($result->getPaginationNext()) {
+                    $pageNumber++;
+                    $this->debugLog('SnowflakeService: Retrieved page ' . $pageNumber);
+                }
             }
+            
+            // Get the transformed data with column names as keys
+            $data = $result->toArray();
+            $this->debugLog('SnowflakeService: Processed result data', [
+                'row_count' => count($data),
+            ]);
 
             $collection = collect($data);
             $this->debugLog('SnowflakeService: Query execution completed', [
