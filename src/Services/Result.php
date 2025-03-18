@@ -117,6 +117,29 @@ class Result
         return $this->data;
     }
 
+    /**
+     * Add data from additional result pages
+     *
+     * @param array $pageData Data from an additional page
+     * @return $this
+     */
+    public function addPageData(array $pageData)
+    {
+        $this->debugLog('Result: Adding page data', [
+            'existing_data_count' => count($this->data),
+            'new_data_count' => count($pageData)
+        ]);
+        
+        // Append the new data to the existing data array
+        $this->data = array_merge($this->data, $pageData);
+        
+        $this->debugLog('Result: Data merged successfully', [
+            'total_data_count' => count($this->data)
+        ]);
+        
+        return $this;
+    }
+
     public function setTimestamp($timestamp)
     {
         $this->debugLog('Result: Setting timestamp', ['timestamp' => $timestamp]);

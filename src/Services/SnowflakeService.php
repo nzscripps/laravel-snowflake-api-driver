@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace LaravelSnowflakeApi\Services;
 
 use LaravelSnowflakeApi\Services\Result;
+use LaravelSnowflakeApi\Services\SnowflakeConfig;
+use LaravelSnowflakeApi\Exceptions\SnowflakeApiException;
 use Exception;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -26,6 +28,34 @@ class SnowflakeService
     private const CODE_ASYNC = '333334';
 
     /**
+     * Configuration for Snowflake API
+     *
+     * @var SnowflakeConfig
+     */
+    private $config;
+
+    /**
+     * HTTP Client instance for reuse
+     * 
+     * @var \Symfony\Contracts\HttpClient\HttpClientInterface
+     */
+    private $httpClient;
+
+    /**
+     * Cached access token to avoid regeneration on every request
+     * 
+     * @var string|null
+     */
+    private $cachedToken = null;
+
+    /**
+     * Expiry timestamp for the cached token
+     * 
+     * @var int
+     */
+    private $tokenExpiry = 0;
+
+    /**
      * Initialize the Snowflake API service
      *
      * @param string $baseUrl The base URL for the Snowflake API
@@ -40,28 +70,43 @@ class SnowflakeService
      * @param int $timeout Timeout in seconds for query execution
      */
     public function __construct(
-        private string $baseUrl,
-        private string $account,
-        private string $user,
-        private string $publicKey,
-        private string $privateKey,
-        private string $privateKeyPassphrase,
-        private string $warehouse,
-        private string $database,
-        private string $schema,
-        private int $timeout
+        string $baseUrl,
+        string $account,
+        string $user,
+        string $publicKey,
+        string $privateKey,
+        string $privateKeyPassphrase,
+        string $warehouse,
+        string $database,
+        string $schema,
+        int $timeout
     ) {
+        $this->config = new SnowflakeConfig(
+            $baseUrl, 
+            $account, 
+            $user, 
+            $publicKey, 
+            $privateKey, 
+            $privateKeyPassphrase, 
+            $warehouse, 
+            $database, 
+            $schema, 
+            $timeout
+        );
+        
+        $this->httpClient = HttpClient::create();
+        
         $this->debugLog('SnowflakeService: Initialized', [
-            'baseUrl' => $this->baseUrl,
-            'account' => $this->account,
-            'user' => $this->user,
-            'warehouse' => $this->warehouse,
-            'database' => $this->database,
-            'schema' => $this->schema,
-            'timeout' => $this->timeout,
-            'has_privateKey' => !empty($this->privateKey),
-            'has_publicKey' => !empty($this->publicKey),
-            'has_passphrase' => !empty($this->privateKeyPassphrase),
+            'baseUrl' => $this->config->getBaseUrl(),
+            'account' => $this->config->getAccount(),
+            'user' => $this->config->getUser(),
+            'warehouse' => $this->config->getWarehouse(),
+            'database' => $this->config->getDatabase(),
+            'schema' => $this->config->getSchema(),
+            'timeout' => $this->config->getTimeout(),
+            'has_privateKey' => !empty($this->config->getPrivateKey()),
+            'has_publicKey' => !empty($this->config->getPublicKey()),
+            'has_passphrase' => !empty($this->config->getPrivateKeyPassphrase()),
         ]);
     }
 
@@ -75,14 +120,17 @@ class SnowflakeService
             $token = $this->getAccessToken();
             $this->debugLog('SnowflakeService: Connection test successful - token generated');
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Connection test failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw new Exception("Connection test failed: " . $e->getMessage(), 0, $e);
+            $this->handleError($e, 'Connection test failed');
+            throw new SnowflakeApiException("Connection test failed: " . $e->getMessage(), 0, $e);
         }
     }
 
+    /**
+     * Execute a SQL query and return the results as a collection
+     *
+     * @param string $query The SQL query to execute
+     * @return Collection The query results
+     */
     public function ExecuteQuery(string $query): Collection
     {
         $this->debugLog('SnowflakeService: Starting query execution', [
@@ -105,13 +153,13 @@ class SnowflakeService
                 $this->debugLog('SnowflakeService: Waiting for execution to complete', [
                     'statementId' => $statementId,
                     'timeElapsed' => $timeElapsed,
-                    'timeout' => $this->timeout,
+                    'timeout' => $this->config->getTimeout(),
                 ]);
 
-                if ($timeElapsed >= $this->timeout) {
+                if ($timeElapsed >= $this->config->getTimeout()) {
                     Log::warning('SnowflakeService: Query execution timed out', [
                         'statementId' => $statementId,
-                        'timeout' => $this->timeout,
+                        'timeout' => $this->config->getTimeout(),
                     ]);
                     $this->cancelStatement($statementId);
                     return collect();
@@ -127,10 +175,29 @@ class SnowflakeService
             // Process result once all pages have been collected
             if ($result->getPageTotal() > 1) {
                 $this->debugLog('SnowflakeService: Multiple pages detected, retrieving all pages');
-                $pageNumber = 1;
-                while ($result->getPaginationNext()) {
-                    $pageNumber++;
-                    $this->debugLog('SnowflakeService: Retrieved page ' . $pageNumber);
+                
+                // Collect promises for all pages
+                $promises = [];
+                for ($page = 2; $page <= $result->getPageTotal(); $page++) {
+                    $this->debugLog('SnowflakeService: Requesting page ' . $page);
+                    $url = sprintf(
+                        'https://%s.snowflakecomputing.com/api/v2/statements/%s?%s', 
+                        $this->config->getAccount(), 
+                        $statementId, 
+                        http_build_query(['partition' => $page - 1])
+                    );
+                    
+                    $promises[$page] = $this->httpClient->request('GET', $url, [
+                        'headers' => $this->getHeaders(),
+                        'async' => true
+                    ]);
+                }
+                
+                // Process the responses
+                foreach ($promises as $page => $response) {
+                    $pageData = $this->toArray($response);
+                    $result->addPageData($pageData['data'] ?? []);
+                    $this->debugLog('SnowflakeService: Retrieved page ' . $page);
                 }
             }
             
@@ -147,11 +214,7 @@ class SnowflakeService
 
             return $collection;
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Error executing query', [
-                'query' => $query,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            $this->handleError($e, 'Error executing query', ['query' => $query]);
             throw $e;
         }
     }
@@ -160,21 +223,29 @@ class SnowflakeService
      * Generate a Snowflake API access token using JWT
      * 
      * This method will:
-     * 1. Use the private key content provided in the constructor
-     * 2. Create a JWT with the appropriate claims
-     * 3. Sign it using RS256 algorithm
-     * 4. Return the serialized token
+     * 1. Return cached token if available and not expired
+     * 2. Use the private key content provided in the constructor
+     * 3. Create a JWT with the appropriate claims
+     * 4. Sign it using RS256 algorithm
+     * 5. Cache the token for future use
+     * 6. Return the serialized token
      *
      * @return string The JWT access token for Snowflake API
      * @throws Exception If unable to generate the token
      */
     private function getAccessToken(): string
     {
-        $this->debugLog('SnowflakeService: Generating access token');
+        // Return cached token if still valid
+        if ($this->cachedToken && time() < $this->tokenExpiry - 60) { // 1 minute buffer
+            $this->debugLog('SnowflakeService: Using cached access token');
+            return $this->cachedToken;
+        }
+
+        $this->debugLog('SnowflakeService: Generating new access token');
 
         try {
             // Use the private key content directly
-            $keyContent = $this->privateKey;
+            $keyContent = $this->config->getPrivateKey();
             
             if (empty($keyContent)) {
                 throw new Exception("Private key content is empty");
@@ -191,7 +262,7 @@ class SnowflakeService
             $this->debugLog('SnowflakeService: Creating JWK from private key');
             $privateKey = JWKFactory::createFromKey(
                 $keyContent,
-                $this->privateKeyPassphrase,
+                $this->config->getPrivateKeyPassphrase(),
                 [
                     'use' => 'sig',
                     'alg' => 'RS256',
@@ -209,16 +280,16 @@ class SnowflakeService
             
             $this->debugLog('SnowflakeService: JWK created successfully');
 
-            $publicKeyFingerprint = 'SHA256:' . $this->publicKey;
+            $publicKeyFingerprint = 'SHA256:' . $this->config->getPublicKey();
             $this->debugLog('SnowflakeService: Using public key fingerprint', [
-                'raw_public_key' => $this->publicKey,
+                'raw_public_key' => $this->config->getPublicKey(),
                 'fingerprint' => $publicKeyFingerprint,
             ]);
             
-            $expires_in = time() + (60 * 60);
+            $expires_in = time() + (60 * 60); // 1 hour expiry
             $payload = [
-                'iss' => sprintf('%s.%s', $this->user, $publicKeyFingerprint),
-                'sub' => $this->user,
+                'iss' => sprintf('%s.%s', $this->config->getUser(), $publicKeyFingerprint),
+                'sub' => $this->config->getUser(),
                 'iat' => time(),
                 'exp' => $expires_in,
             ];
@@ -247,6 +318,10 @@ class SnowflakeService
             $serializer = new CompactSerializer();
             $access_token = $serializer->serialize($jws);
 
+            // Cache the token and its expiry
+            $this->cachedToken = $access_token;
+            $this->tokenExpiry = $expires_in;
+
             // Log the first and last 10 characters of the token for debugging
             $token_start = substr($access_token, 0, 10);
             $token_end = substr($access_token, -10);
@@ -259,6 +334,8 @@ class SnowflakeService
                 'header_length' => strlen($token_parts[0] ?? ''),
                 'payload_length' => strlen($token_parts[1] ?? ''),
                 'signature_length' => strlen($token_parts[2] ?? ''),
+                'token_cached' => true,
+                'token_expires' => date('Y-m-d H:i:s', $this->tokenExpiry),
             ]);
 
             // Debug the headers for verification
@@ -272,14 +349,17 @@ class SnowflakeService
 
             return $access_token;
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Error generating access token', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            throw new Exception("Failed to generate access token: " . $e->getMessage(), 0, $e);
+            $this->handleError($e, 'Error generating access token');
+            throw new SnowflakeApiException("Failed to generate access token: " . $e->getMessage(), 0, $e);
         }
     }
 
+    /**
+     * Post a SQL statement to Snowflake for execution
+     *
+     * @param string $statement The SQL statement to execute
+     * @return string The statement handle ID
+     */
     public function postStatement(string $statement): string
     {
         $this->debugLog('SnowflakeService: Posting statement', [
@@ -292,47 +372,23 @@ class SnowflakeService
                 'nullable' => 'true'
             ]);
 
-            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements?%s', $this->account, $variables);
-            $this->debugLog('SnowflakeService: Prepared URL for statement', [
-                'url' => $url,
-            ]);
-
+            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements?%s', $this->config->getAccount(), $variables);
+            
             $data = [
                 'statement' => $statement,
-                'warehouse' => $this->warehouse,
-                'database' => $this->database,
-                'schema' => $this->schema,
+                'warehouse' => $this->config->getWarehouse(),
+                'database' => $this->config->getDatabase(),
+                'schema' => $this->config->getSchema(),
                 'resultSetMetaData' => [
                     'format' => 'jsonv2',
                 ],
             ];
-            $this->debugLog('SnowflakeService: Prepared data for statement', [
-                'warehouse' => $this->warehouse,
-                'database' => $this->database,
-                'schema' => $this->schema,
-            ]);
-
-            $this->debugLog('SnowflakeService: Getting headers for request');
-            $headers = $this->getHeaders();
-            $this->debugLog('SnowflakeService: Headers retrieved');
-
-            $this->debugLog('SnowflakeService: Creating HTTP client');
-            $httpClient = HttpClient::create();
-
-            $this->debugLog('SnowflakeService: Sending POST request');
-            $response = $httpClient->request('POST', $url, [
-                'headers' => $headers,
+            
+            $content = $this->makeRequest('POST', $url, [
                 'json' => $data,
             ]);
-            $this->debugLog('SnowflakeService: POST request sent');
 
-            $this->debugLog('SnowflakeService: Converting response to array');
-            $content = $this->toArray($response);
-            $this->debugLog('SnowflakeService: Response converted to array');
-
-            $this->debugLog('SnowflakeService: Validating result');
             $this->hasResult($content, [self::CODE_ASYNC]);
-            $this->debugLog('SnowflakeService: Result validated');
 
             $this->debugLog('SnowflakeService: Statement posted successfully', [
                 'statementHandle' => $content['statementHandle'],
@@ -340,15 +396,18 @@ class SnowflakeService
 
             return $content['statementHandle'];
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Error posting statement', [
-                'statement' => $statement,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            $this->handleError($e, 'Error posting statement', ['statement' => $statement]);
             throw $e;
         }
     }
 
+    /**
+     * Get statement results for a specific page
+     *
+     * @param string $id Statement handle ID
+     * @param int $page Page number to retrieve (1-based)
+     * @return array The statement results
+     */
     public function getStatement(string $id, int $page): array
     {
         $this->debugLog('SnowflakeService: Getting statement results', [
@@ -361,25 +420,13 @@ class SnowflakeService
                 'partition' => $page - 1,
             ]);
 
-            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements/%s?%s', $this->account, $id, $variables);
-            $this->debugLog('SnowflakeService: Prepared URL for getting statement', [
-                'url' => $url,
-            ]);
-
-            $this->debugLog('SnowflakeService: Getting headers for request');
-            $headers = $this->getHeaders();
-
-            $this->debugLog('SnowflakeService: Creating HTTP client');
-            $httpClient = HttpClient::create();
-
-            $this->debugLog('SnowflakeService: Sending GET request');
-            $response = $httpClient->request('GET', $url, [
-                'headers' => $headers,
-            ]);
-            $this->debugLog('SnowflakeService: GET request sent');
-
-            $this->debugLog('SnowflakeService: Converting response to array');
-            $result = $this->toArray($response);
+            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements/%s?%s', 
+                $this->config->getAccount(), 
+                $id, 
+                $variables
+            );
+            
+            $result = $this->makeRequest('GET', $url);
 
             $this->debugLog('SnowflakeService: Statement results retrieved', [
                 'code' => $result['code'] ?? 'no-code',
@@ -389,16 +436,19 @@ class SnowflakeService
 
             return $result;
         } catch (Exception $e) {
-            $this->debugLog('SnowflakeService: Error getting statement', [
+            $this->handleError($e, 'Error getting statement', [
                 'statementId' => $id,
                 'page' => $page,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
             throw $e;
         }
     }
 
+    /**
+     * Cancel a running statement
+     *
+     * @param string $id Statement handle ID to cancel
+     */
     public function cancelStatement(string $id): void
     {
         $this->debugLog('SnowflakeService: Cancelling statement', [
@@ -406,23 +456,15 @@ class SnowflakeService
         ]);
 
         try {
-            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements/%s/cancel', $this->account, $id);
-            $this->debugLog('SnowflakeService: Prepared URL for cancelling statement', [
-                'url' => $url,
+            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements/%s/cancel', 
+                $this->config->getAccount(), 
+                $id
+            );
+            
+            $response = $this->httpClient->request('POST', $url, [
+                'headers' => $this->getHeaders(),
             ]);
-
-            $this->debugLog('SnowflakeService: Getting headers for request');
-            $headers = $this->getHeaders();
-
-            $this->debugLog('SnowflakeService: Creating HTTP client');
-            $httpClient = HttpClient::create();
-
-            $this->debugLog('SnowflakeService: Sending POST request for cancellation');
-            $response = $httpClient->request('POST', $url, [
-                'headers' => $headers,
-            ]);
-            $this->debugLog('SnowflakeService: POST request for cancellation sent');
-
+            
             // Check the status code first
             $statusCode = $response->getStatusCode();
             
@@ -437,16 +479,11 @@ class SnowflakeService
                     $content = $response->getContent(false);
                     
                     if (!empty($content)) {
-                        $this->debugLog('SnowflakeService: Converting response to array and validating');
                         $responseData = json_decode($content, true);
                         
                         if (is_array($responseData) && isset($responseData['code'])) {
                             $this->hasResult($responseData, [self::CODE_SUCCESS]);
-                        } else {
-                            $this->debugLog('SnowflakeService: Response not in expected format, but status code indicates success');
                         }
-                    } else {
-                        $this->debugLog('SnowflakeService: Empty response body but status code indicates success');
                     }
                 } catch (Exception $contentException) {
                     // Log but don't throw - if status code was 2xx, we consider it a success
@@ -463,15 +500,17 @@ class SnowflakeService
 
             $this->debugLog('SnowflakeService: Statement cancelled successfully');
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Error cancelling statement', [
-                'statementId' => $id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            $this->handleError($e, 'Error cancelling statement', ['statementId' => $id]);
             throw $e;
         }
     }
 
+    /**
+     * Get the result for a statement
+     *
+     * @param string $id Statement handle ID
+     * @return Result The statement result
+     */
     public function getResult(string $id): Result
     {
         $this->debugLog('SnowflakeService: Getting result for statement', [
@@ -479,73 +518,82 @@ class SnowflakeService
         ]);
 
         try {
-            $this->debugLog('SnowflakeService: Fetching statement data for page 1');
             $data = $this->getStatement($id, 1);
-
-            $executed = $data['code'] === self::CODE_SUCCESS;
-            $this->debugLog('SnowflakeService: Statement execution status', [
-                'executed' => $executed,
-                'code' => $data['code'],
-            ]);
-
-            $this->debugLog('SnowflakeService: Creating Result object');
-            $result = new Result($this);
-            $result->setId($data['statementHandle']);
-            $result->setExecuted($executed);
-
-            if (false === $executed) {
-                $this->debugLog('SnowflakeService: Statement not yet executed, returning partial result');
-                return $result;
-            }
-
-            $this->debugLog('SnowflakeService: Validating response data structure');
-            foreach (['resultSetMetaData', 'data', 'createdOn'] as $field) {
-                if (false === array_key_exists($field, $data)) {
-                    $errorMsg = sprintf('Object "%s" not found', $field);
-                    Log::error('SnowflakeService: Required field missing in response', [
-                        'field' => $field,
-                        'keys_present' => array_keys($data),
-                    ]);
-                    throw new Exception($errorMsg);
-                }
-            }
-
-            foreach (['numRows', 'partitionInfo', 'rowType'] as $field) {
-                if (false === array_key_exists($field, $data['resultSetMetaData'])) {
-                    $errorMsg = sprintf('Object "%s" in "resultSetMetaData" not found', $field);
-                    Log::error('SnowflakeService: Required metadata field missing in response', [
-                        'field' => $field,
-                        'keys_present' => array_keys($data['resultSetMetaData']),
-                    ]);
-                    throw new Exception($errorMsg);
-                }
-            }
-
-            $this->debugLog('SnowflakeService: Populating Result object with data', [
-                'numRows' => $data['resultSetMetaData']['numRows'],
-                'partitionInfo_count' => count($data['resultSetMetaData']['partitionInfo']),
-                'data_count' => count($data['data']),
-            ]);
-
-            $result->setTotal($data['resultSetMetaData']['numRows']);
-            $result->setPage(1);
-            $result->setPageTotal(count($data['resultSetMetaData']['partitionInfo']));
-            $result->setFields($data['resultSetMetaData']['rowType']);
-            $result->setData($data['data']);
-            $result->setTimestamp($data['createdOn']);
-
-            $this->debugLog('SnowflakeService: Result object created successfully');
-            return $result;
+            return $this->processResultData($data);
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Error getting result', [
-                'statementId' => $id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            $this->handleError($e, 'Error getting result', ['statementId' => $id]);
             throw $e;
         }
     }
 
+    /**
+     * Process and validate result data into a Result object
+     *
+     * @param array $data The data to process
+     * @return Result The processed result
+     */
+    private function processResultData(array $data): Result
+    {
+        $executed = $data['code'] === self::CODE_SUCCESS;
+        
+        $result = new Result($this);
+        $result->setId($data['statementHandle']);
+        $result->setExecuted($executed);
+
+        if (false === $executed) {
+            return $result;
+        }
+
+        $this->validateResultStructure($data);
+
+        $result->setTotal($data['resultSetMetaData']['numRows']);
+        $result->setPage(1);
+        $result->setPageTotal(count($data['resultSetMetaData']['partitionInfo']));
+        $result->setFields($data['resultSetMetaData']['rowType']);
+        $result->setData($data['data']);
+        $result->setTimestamp($data['createdOn']);
+
+        return $result;
+    }
+
+    /**
+     * Validate the structure of result data
+     *
+     * @param array $data The data to validate
+     * @throws Exception If validation fails
+     */
+    private function validateResultStructure(array $data): void
+    {
+        foreach (['resultSetMetaData', 'data', 'createdOn'] as $field) {
+            if (false === array_key_exists($field, $data)) {
+                $errorMsg = sprintf('Object "%s" not found', $field);
+                Log::error('SnowflakeService: Required field missing in response', [
+                    'field' => $field,
+                    'keys_present' => array_keys($data),
+                ]);
+                throw new Exception($errorMsg);
+            }
+        }
+
+        foreach (['numRows', 'partitionInfo', 'rowType'] as $field) {
+            if (false === array_key_exists($field, $data['resultSetMetaData'])) {
+                $errorMsg = sprintf('Object "%s" in "resultSetMetaData" not found', $field);
+                Log::error('SnowflakeService: Required metadata field missing in response', [
+                    'field' => $field,
+                    'keys_present' => array_keys($data['resultSetMetaData']),
+                ]);
+                throw new Exception($errorMsg);
+            }
+        }
+    }
+
+    /**
+     * Validate that a result has expected codes
+     *
+     * @param array $data The data to validate
+     * @param array $codes Expected valid codes
+     * @throws Exception If validation fails
+     */
     private function hasResult(array $data, array $codes): void
     {
         $this->debugLog('SnowflakeService: Validating result data', [
@@ -582,53 +630,72 @@ class SnowflakeService
                     throw new Exception('Unprocessable result', 422);
                 }
             }
-
-            $this->debugLog('SnowflakeService: Result validation successful');
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Result validation failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            $this->handleError($e, 'Result validation failed');
             throw $e;
         }
     }
 
+    /**
+     * Get headers for API requests
+     *
+     * @return array Headers
+     */
     private function getHeaders(): array
     {
         $this->debugLog('SnowflakeService: Generating request headers');
 
         try {
-            $this->debugLog('SnowflakeService: Getting access token');
             $accessToken = $this->getAccessToken();
             
-            // Log the full token in a safely printable format - ONLY FOR DEBUGGING
-            // This should be removed in production
-            $this->debugLog('SnowflakeService: Full JWT Token', [
-                'token' => $accessToken
-            ]);
-
-            $headers = [
+            return [
                 sprintf('Authorization: Bearer %s', $accessToken),
                 'Accept-Encoding: gzip',
                 'User-Agent: SnowflakeService/0.5',
                 'X-Snowflake-Authorization-Token-Type: KEYPAIR_JWT',
             ];
-
-            $this->debugLog('SnowflakeService: Headers generated successfully', [
-                'header_count' => count($headers),
-                'authorization_prefix' => substr($headers[0], 0, 25) . '...',
-            ]);
-
-            return $headers;
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Error generating headers', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+            $this->handleError($e, 'Error generating headers');
+            throw $e;
+        }
+    }
+
+    /**
+     * Make a request to the Snowflake API
+     *
+     * @param string $method HTTP method (GET, POST, etc.)
+     * @param string $url URL to request
+     * @param array $options Request options
+     * @return array Response as array
+     */
+    private function makeRequest(string $method, string $url, array $options = []): array
+    {
+        $this->debugLog('SnowflakeService: Making request', [
+            'method' => $method,
+            'url' => $url,
+        ]);
+
+        try {
+            $options['headers'] = $this->getHeaders();
+            
+            $response = $this->httpClient->request($method, $url, $options);
+            
+            return $this->toArray($response);
+        } catch (Exception $e) {
+            $this->handleError($e, 'Error making request', [
+                'method' => $method,
+                'url' => $url,
             ]);
             throw $e;
         }
     }
 
+    /**
+     * Convert a ResponseInterface to an array
+     *
+     * @param ResponseInterface $response The response to convert
+     * @return array The response as array
+     */
     private function toArray(ResponseInterface $response): array
     {
         $this->debugLog('SnowflakeService: Converting HTTP response to array', [
@@ -643,64 +710,42 @@ class SnowflakeService
             }
 
             $headers = $response->getHeaders(false);
-            $this->debugLog('SnowflakeService: Response headers', [
-                'headers' => array_keys($headers),
-                'content_length' => strlen($content),
-                'is_gzipped' => isset($headers['content-encoding'][0]) && $headers['content-encoding'][0] === 'gzip',
-            ]);
 
             if ('gzip' === ($headers['content-encoding'][0] ?? null)) {
-                $this->debugLog('SnowflakeService: Decompressing gzipped content');
                 $content = $this->gzdecode($content);
-                $this->debugLog('SnowflakeService: Content decompressed', [
-                    'decompressed_length' => strlen($content),
-                ]);
             }
 
-            $this->debugLog('SnowflakeService: Parsing JSON response');
             try {
                 $content = json_decode($content, true, 512, JSON_BIGINT_AS_STRING | JSON_THROW_ON_ERROR);
-                $this->debugLog('SnowflakeService: JSON parsed successfully', [
-                    'keys' => is_array($content) ? array_keys($content) : 'not-an-array',
-                ]);
             } catch (JsonException $exception) {
-                Log::error('SnowflakeService: JSON parse error', [
-                    'error' => $exception->getMessage(),
+                $this->handleError($exception, 'JSON parse error', [
                     'url' => $response->getInfo('url'),
                 ]);
                 throw new JsonException(sprintf('%s for "%s".', $exception->getMessage(), $response->getInfo('url')), $exception->getCode());
             }
 
             if (false === is_array($content)) {
-                Log::error('SnowflakeService: Expected array but got different type', [
-                    'type' => get_debug_type($content),
-                    'url' => $response->getInfo('url'),
-                ]);
                 throw new JsonException(sprintf('JSON content was expected to decode to an array, "%s" returned for "%s".', get_debug_type($content), $response->getInfo('url')));
             }
 
             $statusCode = $response->getStatusCode();
             if ($statusCode >= 400) {
-                Log::error('SnowflakeService: HTTP error response', [
-                    'status_code' => $statusCode,
-                    'message' => $content["message"] ?? 'no-message',
-                    'error_details' => $content["data"] ?? [],
-                    'full_response' => $content,
-                ]);
                 throw new Exception(sprintf('Snowflake error, %s returned with message: %s', $statusCode, $content["message"] ?? 'Unknown error'), $statusCode);
             }
 
-            $this->debugLog('SnowflakeService: Response converted to array successfully');
             return $content;
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Error converting response to array', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            $this->handleError($e, 'Error converting response to array');
             throw $e;
         }
     }
 
+    /**
+     * Decompress gzipped content
+     *
+     * @param string $data The compressed data
+     * @return string The decompressed content
+     */
     private function gzdecode(string $data): string
     {
         $this->debugLog('SnowflakeService: Decompressing gzipped data', [
@@ -709,8 +754,7 @@ class SnowflakeService
 
         try {
             $inflate = inflate_init(ZLIB_ENCODING_GZIP);
-            $this->debugLog('SnowflakeService: Initialized inflate');
-
+            
             $content = '';
             $offset = 0;
 
@@ -718,30 +762,33 @@ class SnowflakeService
                 $chunk = inflate_add($inflate, substr($data, $offset));
                 $content .= $chunk;
 
-                $this->debugLog('SnowflakeService: Processed chunk', [
-                    'chunk_length' => strlen($chunk),
-                    'processed_so_far' => strlen($content),
-                ]);
-
                 if (ZLIB_STREAM_END === inflate_get_status($inflate)) {
                     $offset += inflate_get_read_len($inflate);
-                    $this->debugLog('SnowflakeService: Reached stream end', [
-                        'new_offset' => $offset,
-                    ]);
                 }
             } while ($offset < strlen($data));
 
-            $this->debugLog('SnowflakeService: Data decompressed successfully', [
-                'decompressed_length' => strlen($content),
-            ]);
-
             return $content;
         } catch (Exception $e) {
-            Log::error('SnowflakeService: Error decompressing data', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            $this->handleError($e, 'Error decompressing data');
             throw $e;
         }
+    }
+
+    /**
+     * Handle and log errors consistently
+     *
+     * @param Exception $e The exception to handle
+     * @param string $context Context information
+     * @param array $additionalData Additional data to log
+     */
+    private function handleError(Exception $e, string $context, array $additionalData = []): void
+    {
+        $errorData = array_merge([
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+            'context' => $context
+        ], $additionalData);
+        
+        Log::error('SnowflakeService: ' . $context, $errorData);
     }
 }
