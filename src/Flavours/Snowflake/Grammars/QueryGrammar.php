@@ -76,9 +76,9 @@ class QueryGrammar extends Grammar
         return $this->getValue($table);
     }
 
-    public static function preWrapTable($tableName)
+    protected function preWrapTable($tableName)
     {
-        self::debugLog('preWrapTable', ['tableName' => $tableName, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('preWrapTable', ['tableName' => $tableName, 'file' => __FILE__, 'line' => __LINE__]);
         if ($tableName instanceof Blueprint) {
             $tableName = $tableName->getTable();
         }
@@ -228,5 +228,12 @@ class QueryGrammar extends Grammar
     {
         $this->debugLog('escape', ['value' => $value, 'binary' => $binary, 'file' => __FILE__, 'line' => __LINE__]);
         return DB::connection()->getPdo()->quote($value);
+    }
+
+    protected static function debugLog($message, array $context = [])
+    {
+        if (env('SF_DEBUG', false)) {
+            Log::info($message, $context);
+        }
     }
 }
