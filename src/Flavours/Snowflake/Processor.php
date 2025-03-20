@@ -60,4 +60,19 @@ class Processor extends BaseProcessor
 
         return is_numeric($id) ? (int) $id : $id;
     }
+
+    /**
+     * Process the results of a "select" query.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  array  $results
+     * @return array
+     */
+    public function processSelect(Builder $query, $results)
+    {
+        $this->debugLog('processSelect', ['result_count' => count($results)]);
+        
+        // Results are already processed in the Result class
+        return $results;
+    }
 }

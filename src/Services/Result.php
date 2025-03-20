@@ -212,6 +212,9 @@ class Result
                     $value = $value['Item'];
                 }
                 
+                // Convert types to native PHP types
+                $value = $this->convertToNativeType($value, $field['type'] ?? null);
+                
                 $rowData->$columnName = $value;
             }
             
@@ -223,6 +226,51 @@ class Result
         ]);
         
         return $result;
+    }
+
+    /**
+     * Convert a value to its native PHP type based on Snowflake type
+     *
+     * @param mixed $value The value to convert
+     * @param string|null $type The Snowflake data type
+     * @return mixed The converted value
+     */
+    protected function convertToNativeType($value, $type = null)
+    {
+        // Handle null values
+        if ($value === null) {
+            return null;
+        }
+        
+        // Handle boolean values
+        if (is_string($value) && ($type === 'BOOLEAN' || strtolower($value) === 'true' || strtolower($value) === 'false')) {
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+        }
+        
+        // Handle numeric values
+        if (is_string($value) && is_numeric($value)) {
+            // Integer
+            if ($type === 'INTEGER' || $type === 'BIGINT' || $type === 'SMALLINT' || $type === 'TINYINT') {
+                return (int)$value;
+            }
+            
+            // Float/double/decimal - use float for PHP representation
+            if ($type === 'FLOAT' || $type === 'DOUBLE' || $type === 'DECIMAL' || $type === 'NUMERIC' || $type === 'REAL') {
+                return (float)$value;
+            }
+            
+            // For other numeric-looking strings, convert to appropriate type
+            if (filter_var($value, FILTER_VALIDATE_INT) !== false) {
+                return (int)$value;
+            }
+            
+            if (filter_var($value, FILTER_VALIDATE_FLOAT) !== false) {
+                return (float)$value;
+            }
+        }
+        
+        // Return original value for other types
+        return $value;
     }
 
     /**
