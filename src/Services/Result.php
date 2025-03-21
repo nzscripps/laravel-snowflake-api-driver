@@ -197,31 +197,39 @@ class Result
             'fields_count' => count($this->fields)
         ]);
         
-        $result = [];
+        // Pre-process field mapping once outside the loop
+        $fieldMap = [];
+        foreach ($this->fields as $index => $field) {
+            $fieldMap[$index] = $field['name'] ?? "column_$index";
+        }
         
-        // Transform data to use column names as keys and convert to objects
-        foreach ($this->data as $row) {
-            $rowData = new \stdClass();
+        // Transform data to associative arrays with column names as keys
+        $result = array_map(function($row) use ($fieldMap) {
+            $rowData = [];
             
-            foreach ($this->fields as $index => $field) {
-                $columnName = $field['name'] ?? "column_$index";
-                $value = $row[$index] ?? null;
+            // Process only the needed indices based on field map
+            foreach ($fieldMap as $index => $columnName) {
+                if (!isset($row[$index])) {
+                    $rowData[$columnName] = null;
+                    continue;
+                }
+                
+                $value = $row[$index];
                 
                 // Handle case where value is wrapped in an "Item" object
                 if (is_array($value) && count($value) === 1 && isset($value['Item'])) {
                     $value = $value['Item'];
                 }
                 
-                // Convert types to native PHP types
-                $value = $this->convertToNativeType($value, $field['type'] ?? null);
-                
-                $rowData->$columnName = $value;
+                // Convert types to native PHP types - only pass type info if needed
+                $type = $this->fields[$index]['type'] ?? null;
+                $rowData[$columnName] = $this->convertToNativeType($value, $type);
             }
             
-            $result[] = $rowData;
-        }
+            return $rowData;
+        }, $this->data);
         
-        $this->debugLog('Result: Transformed data to Eloquent-compatible format', [
+        $this->debugLog('Result: Transformed data to array format', [
             'result_count' => count($result)
         ]);
         

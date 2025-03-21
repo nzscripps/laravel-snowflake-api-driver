@@ -10,6 +10,7 @@ use LaravelSnowflakeApi\Exceptions\SnowflakeApiException;
 use Exception;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use Jose\Component\Core\AlgorithmManager;
 use Jose\Component\KeyManagement\JWKFactory;
 use Jose\Component\Signature\Algorithm\RS256;
@@ -234,10 +235,24 @@ class SnowflakeService
      */
     private function getAccessToken(): string
     {
-        // Return cached token if still valid
-        if ($this->cachedToken && time() < $this->tokenExpiry - 60) { // 1 minute buffer
-            $this->debugLog('SnowflakeService: Using cached access token');
-            return $this->cachedToken;
+        // Generate a cache key based on account and user
+        $cacheKey = "snowflake_api_token:{$this->config->getAccount()}:{$this->config->getUser()}";
+        
+        // Try to get token from Laravel cache first
+        $cachedTokenData = Cache::get($cacheKey);
+        
+        if ($cachedTokenData && 
+            isset($cachedTokenData['token']) && 
+            isset($cachedTokenData['expiry']) && 
+            time() < $cachedTokenData['expiry'] - 60) { // 1 minute buffer
+            
+            $this->debugLog('SnowflakeService: Using cached access token from application cache');
+            
+            // Also set instance properties for backward compatibility
+            $this->cachedToken = $cachedTokenData['token'];
+            $this->tokenExpiry = $cachedTokenData['expiry'];
+            
+            return $cachedTokenData['token'];
         }
 
         $this->debugLog('SnowflakeService: Generating new access token');
@@ -317,9 +332,25 @@ class SnowflakeService
             $serializer = new CompactSerializer();
             $access_token = $serializer->serialize($jws);
 
-            // Cache the token and its expiry
+            // Cache the token and its expiry in both instance properties and Laravel cache
             $this->cachedToken = $access_token;
             $this->tokenExpiry = $expires_in;
+            
+            // Store token in Laravel cache with expiry
+            $cacheData = [
+                'token' => $access_token,
+                'expiry' => $expires_in,
+            ];
+            
+            // Cache until 1 minute before expiry
+            $cacheDuration = $expires_in - time() - 60;
+            Cache::put($cacheKey, $cacheData, $cacheDuration);
+            
+            $this->debugLog('SnowflakeService: Token stored in application cache', [
+                'cache_key' => $cacheKey,
+                'cache_duration' => $cacheDuration,
+                'expiry_time' => date('Y-m-d H:i:s', $expires_in),
+            ]);
 
             // Log the first and last 10 characters of the token for debugging
             $token_start = substr($access_token, 0, 10);
