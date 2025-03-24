@@ -95,11 +95,7 @@ class SnowflakeService
             $timeout
         );
         
-        $this->httpClient = HttpClient::create([
-            'http_version' => '2.0',
-            'max_duration' => 60,
-            'max_redirects' => 5
-        ]);
+        $this->httpClient = HttpClient::create();
         
         $this->debugLog('SnowflakeService: Initialized', [
             'baseUrl' => $this->config->getBaseUrl(),
@@ -197,24 +193,11 @@ class SnowflakeService
                     ]);
                 }
                 
-                // Process the responses concurrently using Promise pattern
-                $promises = [];
+                // Process the responses
                 foreach ($responses as $page => $response) {
-                    $promises[$page] = $response->toArray(false);
-                }
-                
-                // Wait for all promises to complete
-                foreach ($promises as $page => $promise) {
-                    try {
-                        $pageData = $promise->wait();
-                        $result->addPageData($pageData['data'] ?? []);
-                        $this->debugLog('SnowflakeService: Retrieved page ' . $page);
-                    } catch (Exception $e) {
-                        $this->debugLog('SnowflakeService: Error retrieving page ' . $page, [
-                            'error' => $e->getMessage()
-                        ]);
-                        // Continue with other pages even if one fails
-                    }
+                    $pageData = $this->toArray($response);
+                    $result->addPageData($pageData['data'] ?? []);
+                    $this->debugLog('SnowflakeService: Retrieved page ' . $page);
                 }
             }
             

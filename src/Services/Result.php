@@ -197,16 +197,14 @@ class Result
             'fields_count' => count($this->fields)
         ]);
         
-        // Pre-process field mapping and type info once outside the loop
+        // Pre-process field mapping once outside the loop
         $fieldMap = [];
-        $typeMap = [];
         foreach ($this->fields as $index => $field) {
             $fieldMap[$index] = $field['name'] ?? "column_$index";
-            $typeMap[$index] = $field['type'] ?? null;
         }
         
         // Transform data to associative arrays with column names as keys
-        $result = array_map(function($row) use ($fieldMap, $typeMap) {
+        $result = array_map(function($row) use ($fieldMap) {
             $rowData = [];
             
             // Process only the needed indices based on field map
@@ -223,17 +221,9 @@ class Result
                     $value = $value['Item'];
                 }
                 
-                // Convert types to native PHP types only when necessary
-                $type = $typeMap[$index];
-                
-                // Skip type conversion for common types that don't need conversion
-                if ($value === null || 
-                    (is_numeric($value) && !is_string($value)) || 
-                    (is_string($value) && empty($type))) {
-                    $rowData[$columnName] = $value;
-                } else {
-                    $rowData[$columnName] = $this->convertToNativeType($value, $type);
-                }
+                // Convert types to native PHP types - only pass type info if needed
+                $type = $this->fields[$index]['type'] ?? null;
+                $rowData[$columnName] = $this->convertToNativeType($value, $type);
             }
             
             return $rowData;
