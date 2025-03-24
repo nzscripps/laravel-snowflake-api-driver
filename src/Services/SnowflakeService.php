@@ -756,18 +756,35 @@ class SnowflakeService
                 throw new JsonException('Response body is empty.');
             }
 
+            // Log raw response for debugging
+            Log::debug('SnowflakeService: Raw response content', [
+                'content_length' => strlen($content),
+                'content_preview' => substr($content, 0, 1000),
+                'url' => $response->getInfo('url')
+            ]);
+
             $headers = $response->getHeaders(false);
 
             if ('gzip' === ($headers['content-encoding'][0] ?? null)) {
                 $content = $this->gzdecode($content);
             }
 
+            // Remove any invisible control characters
+            $content = preg_replace('/[\x00-\x1F\x7F]/u', '', $content);
+
             try {
                 $content = json_decode($content, true, 512, JSON_BIGINT_AS_STRING | JSON_THROW_ON_ERROR);
             } catch (JsonException $exception) {
-                $this->handleError($exception, 'JSON parse error', [
+                // Log detailed error information
+                Log::error('SnowflakeService: JSON decode error', [
+                    'error' => $exception->getMessage(),
                     'url' => $response->getInfo('url'),
+                    'content_length' => strlen($content),
+                    'content_preview' => substr($content, 0, 1000),
+                    'content_type' => $headers['content-type'][0] ?? 'unknown',
+                    'content_encoding' => $headers['content-encoding'][0] ?? 'none'
                 ]);
+                
                 throw new JsonException(sprintf('%s for "%s".', $exception->getMessage(), $response->getInfo('url')), $exception->getCode());
             }
 
