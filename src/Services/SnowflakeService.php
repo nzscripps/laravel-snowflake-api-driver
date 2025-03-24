@@ -285,9 +285,9 @@ class SnowflakeService
             // Replace literal '\n' sequences with actual newlines
             $keyContent = str_replace('\n', "\n", $keyContent);
             $this->debugLog('SnowflakeService: Prepared private key content', [
-                'key_length' => strlen($keyContent),
-                'contains_begin' => str_contains($keyContent, '-----BEGIN'),
-                'contains_end' => str_contains($keyContent, '-----END'),
+                'key_length' => mb_strlen($keyContent, 'UTF-8'),
+                'contains_begin' => mb_strpos($keyContent, '-----BEGIN') !== false,
+                'contains_end' => mb_strpos($keyContent, '-----END') !== false,
             ]);
             
             $this->debugLog('SnowflakeService: Creating JWK from private key');
@@ -370,17 +370,17 @@ class SnowflakeService
             ]);
 
             // Log the first and last 10 characters of the token for debugging
-            $token_start = substr($access_token, 0, 10);
-            $token_end = substr($access_token, -10);
+            $token_start = mb_substr($access_token, 0, 10, 'UTF-8');
+            $token_end = mb_substr($access_token, -10, null, 'UTF-8');
             $token_parts = explode('.', $access_token);
             
             $this->debugLog('SnowflakeService: Access token generated successfully', [
-                'token_length' => strlen($access_token),
+                'token_length' => mb_strlen($access_token, 'UTF-8'),
                 'token_preview' => "{$token_start}...{$token_end}",
                 'token_parts_count' => count($token_parts),
-                'header_length' => strlen($token_parts[0] ?? ''),
-                'payload_length' => strlen($token_parts[1] ?? ''),
-                'signature_length' => strlen($token_parts[2] ?? ''),
+                'header_length' => mb_strlen($token_parts[0] ?? '', 'UTF-8'),
+                'payload_length' => mb_strlen($token_parts[1] ?? '', 'UTF-8'),
+                'signature_length' => mb_strlen($token_parts[2] ?? '', 'UTF-8'),
                 'token_cached' => true,
                 'token_expires' => date('Y-m-d H:i:s', $this->tokenExpiry),
             ]);
@@ -758,8 +758,8 @@ class SnowflakeService
 
             // Log raw response for debugging
             Log::debug('SnowflakeService: Raw response content', [
-                'content_length' => strlen($content),
-                'content_preview' => substr($content, 0, 1000),
+                'content_length' => mb_strlen($content, 'UTF-8'),
+                'content_preview' => mb_substr($content, 0, 1000, 'UTF-8'),
                 'url' => $response->getInfo('url')
             ]);
 
@@ -769,8 +769,8 @@ class SnowflakeService
                 $content = $this->gzdecode($content);
             }
 
-            // Remove any invisible control characters
-            $content = preg_replace('/[\x00-\x1F\x7F]/u', '', $content);
+            // Remove any invisible control characters using mb_ereg_replace
+            $content = mb_ereg_replace('[\x00-\x1F\x7F]', '', $content, 'm');
 
             try {
                 $content = json_decode($content, true, 512, JSON_BIGINT_AS_STRING | JSON_THROW_ON_ERROR);
@@ -779,8 +779,8 @@ class SnowflakeService
                 Log::error('SnowflakeService: JSON decode error', [
                     'error' => $exception->getMessage(),
                     'url' => $response->getInfo('url'),
-                    'content_length' => strlen($content),
-                    'content_preview' => substr($content, 0, 1000),
+                    'content_length' => mb_strlen($content, 'UTF-8'),
+                    'content_preview' => mb_substr($content, 0, 1000, 'UTF-8'),
                     'content_type' => $headers['content-type'][0] ?? 'unknown',
                     'content_encoding' => $headers['content-encoding'][0] ?? 'none'
                 ]);
@@ -813,7 +813,7 @@ class SnowflakeService
     private function gzdecode(string $data): string
     {
         $this->debugLog('SnowflakeService: Decompressing gzipped data', [
-            'data_length' => strlen($data),
+            'data_length' => mb_strlen($data, 'UTF-8'),
         ]);
 
         try {
@@ -823,13 +823,13 @@ class SnowflakeService
             $offset = 0;
 
             do {
-                $chunk = inflate_add($inflate, substr($data, $offset));
+                $chunk = inflate_add($inflate, mb_substr($data, $offset, null, 'UTF-8'));
                 $content .= $chunk;
 
                 if (ZLIB_STREAM_END === inflate_get_status($inflate)) {
                     $offset += inflate_get_read_len($inflate);
                 }
-            } while ($offset < strlen($data));
+            } while ($offset < mb_strlen($data, 'UTF-8'));
 
             return $content;
         } catch (Exception $e) {

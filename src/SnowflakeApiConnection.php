@@ -228,7 +228,7 @@ class SnowflakeApiConnection extends Connection
 
         try {
             $bindingIndex = 0;
-            $result = preg_replace_callback('/\?/', function () use ($bindings, &$bindingIndex) {
+            $result = mb_ereg_replace_callback('\?', function () use ($bindings, &$bindingIndex) {
                 $value = $bindings[$bindingIndex++] ?? '';
 
                 $this->debugLog('SnowflakeApiConnection: Replacing binding', [
@@ -237,7 +237,7 @@ class SnowflakeApiConnection extends Connection
                 ]);
 
                 if (is_string($value)) {
-                    return "'" . str_replace("'", "''", $value) . "'";
+                    return "'" . mb_ereg_replace("'", "''", $value, 'm') . "'";
                 } elseif (is_bool($value)) {
                     return $value ? 'true' : 'false';
                 } elseif (is_null($value)) {
@@ -245,7 +245,7 @@ class SnowflakeApiConnection extends Connection
                 }
 
                 return $value;
-            }, $query);
+            }, $query, 'm');
 
             $this->debugLog('SnowflakeApiConnection: Bindings replaced successfully', [
                 'result_query' => $result
