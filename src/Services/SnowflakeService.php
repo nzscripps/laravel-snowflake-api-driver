@@ -765,8 +765,23 @@ class SnowflakeService
 
             $headers = $response->getHeaders(false);
 
+            // Check if content is gzipped
             if ('gzip' === ($headers['content-encoding'][0] ?? null)) {
-                $content = $this->gzdecode($content);
+                $this->debugLog('SnowflakeService: Detected gzipped content, attempting decompression');
+                try {
+                    $content = $this->gzdecode($content);
+                    $this->debugLog('SnowflakeService: Successfully decompressed content', [
+                        'decompressed_length' => mb_strlen($content, 'UTF-8'),
+                        'decompressed_preview' => mb_substr($content, 0, 1000, 'UTF-8')
+                    ]);
+                } catch (Exception $e) {
+                    Log::error('SnowflakeService: Failed to decompress gzipped content', [
+                        'error' => $e->getMessage(),
+                        'content_length' => mb_strlen($content, 'UTF-8'),
+                        'content_preview' => mb_substr($content, 0, 1000, 'UTF-8')
+                    ]);
+                    throw new JsonException('Failed to decompress gzipped response: ' . $e->getMessage());
+                }
             }
 
             // Remove any invisible control characters using mb_ereg_replace
@@ -817,13 +832,27 @@ class SnowflakeService
         ]);
 
         try {
+            // First try using gzdecode
+            $result = gzdecode($data);
+            if ($result !== false) {
+                $this->debugLog('SnowflakeService: Successfully decompressed using gzdecode');
+                return $result;
+            }
+
+            // If gzdecode fails, try using inflate
             $inflate = inflate_init(ZLIB_ENCODING_GZIP);
+            if ($inflate === false) {
+                throw new Exception('Failed to initialize inflate');
+            }
             
             $content = '';
             $offset = 0;
 
             do {
                 $chunk = inflate_add($inflate, mb_substr($data, $offset, null, 'UTF-8'));
+                if ($chunk === false) {
+                    throw new Exception('Failed to decompress chunk at offset ' . $offset);
+                }
                 $content .= $chunk;
 
                 if (ZLIB_STREAM_END === inflate_get_status($inflate)) {
@@ -831,6 +860,7 @@ class SnowflakeService
                 }
             } while ($offset < mb_strlen($data, 'UTF-8'));
 
+            $this->debugLog('SnowflakeService: Successfully decompressed using inflate');
             return $content;
         } catch (Exception $e) {
             $this->handleError($e, 'Error decompressing data');
