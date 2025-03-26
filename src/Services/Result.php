@@ -254,6 +254,43 @@ class Result
         if (is_string($value) && ($type === 'BOOLEAN' || strtolower($value) === 'true' || strtolower($value) === 'false')) {
             return filter_var($value, FILTER_VALIDATE_BOOLEAN);
         }
+
+        // Handle date/time types
+        if (is_string($value)) {
+            try {
+                switch ($type) {
+                    case 'DATE':
+                        // Handle dates like '2014-12-30'
+                        return new \DateTime($value . ' 00:00:00');
+                        
+                    case 'TIME':
+                        // Handle times like '00:29:01.000' or '00:30'
+                        if (preg_match('/^\d{2}:\d{2}(:\d{2})?(\.\d{3})?$/', $value)) {
+                            // Append date to make it a valid DateTime
+                            return new \DateTime('1970-01-01 ' . $value);
+                        }
+                        break;
+                        
+                    case 'TIMESTAMP':
+                    case 'TIMESTAMP_NTZ': // Timestamp without timezone
+                    case 'TIMESTAMP_LTZ': // Timestamp with local timezone
+                    case 'TIMESTAMP_TZ':  // Timestamp with timezone
+                        // Handle datetime strings like '2024-11-06 00:00:00'
+                        if (strpos($value, ' ') !== false) {
+                            return new \DateTime($value);
+                        }
+                        break;
+                }
+            } catch (\Exception $e) {
+                // Log the error but return original value if date parsing fails
+                Log::warning('Failed to parse date/time value', [
+                    'value' => $value,
+                    'type' => $type,
+                    'error' => $e->getMessage()
+                ]);
+                return $value;
+            }
+        }
         
         // Handle numeric values
         if (is_string($value) && is_numeric($value)) {
