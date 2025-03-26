@@ -56,6 +56,9 @@ class SnowflakeService
      */
     private $tokenExpiry = 0;
 
+    // Add this at class level
+    private $isDebugEnabled = null;
+
     /**
      * Initialize the Snowflake API service
      *
@@ -417,12 +420,10 @@ class SnowflakeService
         ]);
 
         try {
-            $variables = http_build_query([
+            $url = $this->buildApiUrl('statements', [
                 'async' => 'true',
                 'nullable' => 'true'
             ]);
-
-            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements?%s', $this->config->getAccount(), $variables);
             
             $data = [
                 'statement' => $statement,
@@ -622,26 +623,30 @@ class SnowflakeService
      */
     private function validateResultStructure(array $data): void
     {
-        foreach (['resultSetMetaData', 'data', 'createdOn'] as $field) {
-            if (false === array_key_exists($field, $data)) {
-                $errorMsg = sprintf('Object "%s" not found', $field);
-                Log::error('SnowflakeService: Required field missing in response', [
-                    'field' => $field,
-                    'keys_present' => array_keys($data),
-                ]);
-                throw new Exception($errorMsg);
-            }
+        // Check for all required fields at once
+        $requiredTopLevelFields = ['resultSetMetaData', 'data', 'createdOn'];
+        $missingTopLevelFields = array_diff($requiredTopLevelFields, array_keys($data));
+        
+        if (!empty($missingTopLevelFields)) {
+            $errorMsg = sprintf('Objects "%s" not found', implode(', ', $missingTopLevelFields));
+            Log::error('SnowflakeService: Required fields missing in response', [
+                'missing_fields' => $missingTopLevelFields,
+                'keys_present' => array_keys($data),
+            ]);
+            throw new Exception($errorMsg);
         }
 
-        foreach (['numRows', 'partitionInfo', 'rowType'] as $field) {
-            if (false === array_key_exists($field, $data['resultSetMetaData'])) {
-                $errorMsg = sprintf('Object "%s" in "resultSetMetaData" not found', $field);
-                Log::error('SnowflakeService: Required metadata field missing in response', [
-                    'field' => $field,
-                    'keys_present' => array_keys($data['resultSetMetaData']),
-                ]);
-                throw new Exception($errorMsg);
-            }
+        // Only proceed if metadata exists
+        $requiredMetaFields = ['numRows', 'partitionInfo', 'rowType'];
+        $missingMetaFields = array_diff($requiredMetaFields, array_keys($data['resultSetMetaData']));
+        
+        if (!empty($missingMetaFields)) {
+            $errorMsg = sprintf('Objects "%s" in "resultSetMetaData" not found', implode(', ', $missingMetaFields));
+            Log::error('SnowflakeService: Required metadata fields missing in response', [
+                'missing_fields' => $missingMetaFields,
+                'keys_present' => array_keys($data['resultSetMetaData']),
+            ]);
+            throw new Exception($errorMsg);
         }
     }
 
@@ -695,27 +700,31 @@ class SnowflakeService
     }
 
     /**
-     * Get headers for API requests
-     *
-     * @return array Headers
+     * Get headers for API requests with caching
      */
     private function getHeaders(): array
     {
-        $this->debugLog('SnowflakeService: Generating request headers');
-
-        try {
-            $accessToken = $this->getAccessToken();
-            
-            return [
-                sprintf('Authorization: Bearer %s', $accessToken),
-                'Accept-Encoding: gzip',
-                'User-Agent: SnowflakeService/0.5',
-                'X-Snowflake-Authorization-Token-Type: KEYPAIR_JWT',
-            ];
-        } catch (Exception $e) {
-            $this->handleError($e, 'Error generating headers');
-            throw $e;
+        static $cachedHeaders = null;
+        static $headerExpiry = 0;
+        
+        // Return cached headers if they're not close to expiring
+        $currentTime = time();
+        if ($cachedHeaders !== null && $currentTime < $headerExpiry - 120) {
+            return $cachedHeaders;
         }
+        
+        $accessToken = $this->getAccessToken();
+        $cachedHeaders = [
+            sprintf('Authorization: Bearer %s', $accessToken),
+            'Accept-Encoding: gzip',
+            'User-Agent: SnowflakeService/0.5',
+            'X-Snowflake-Authorization-Token-Type: KEYPAIR_JWT',
+        ];
+        
+        // Set header expiry to 2 minutes before token expiry
+        $headerExpiry = $this->tokenExpiry - 120;
+        
+        return $cachedHeaders;
     }
 
     /**
@@ -756,74 +765,38 @@ class SnowflakeService
      */
     private function toArray(ResponseInterface $response): array
     {
-        $this->debugLog('SnowflakeService: Converting HTTP response to array', [
-            'status_code' => $response->getStatusCode(),
-            'content_type' => $response->getHeaders(false)['content-type'][0] ?? 'unknown',
-        ]);
-
         try {
-            if ('' === $content = $response->getContent(false)) {
-                Log::error('SnowflakeService: Response body is empty');
+            $content = $response->getContent(false);
+            if (empty($content)) {
                 throw new JsonException('Response body is empty.');
             }
 
-            // Log raw response for debugging
-            Log::debug('SnowflakeService: Raw response content', [
-                'content_length' => mb_strlen($content, 'UTF-8'),
-                'content_preview' => mb_substr($content, 0, 1000, 'UTF-8'),
-                'url' => $response->getInfo('url')
-            ]);
-
             $headers = $response->getHeaders(false);
-
-            // Check if content is gzipped
+            
+            // Handle gzip content in one step
             if ('gzip' === ($headers['content-encoding'][0] ?? null)) {
-                $this->debugLog('SnowflakeService: Detected gzipped content, attempting decompression');
-                try {
-                    $content = $this->gzdecode($content);
-                    $this->debugLog('SnowflakeService: Successfully decompressed content', [
-                        'decompressed_length' => mb_strlen($content, 'UTF-8'),
-                        'decompressed_preview' => mb_substr($content, 0, 1000, 'UTF-8')
-                    ]);
-                } catch (Exception $e) {
-                    Log::error('SnowflakeService: Failed to decompress gzipped content', [
-                        'error' => $e->getMessage(),
-                        'content_length' => mb_strlen($content, 'UTF-8'),
-                        'content_preview' => mb_substr($content, 0, 1000, 'UTF-8')
-                    ]);
-                    throw new JsonException('Failed to decompress gzipped response: ' . $e->getMessage());
-                }
+                $content = $this->gzdecode($content);
             }
 
-            // Remove any invisible control characters using mb_ereg_replace
-            $content = mb_ereg_replace('[\x00-\x1F\x7F]', '', $content, 'm');
-
-            try {
-                $content = json_decode($content, true, 512, JSON_BIGINT_AS_STRING | JSON_THROW_ON_ERROR);
-            } catch (JsonException $exception) {
-                // Log detailed error information
-                Log::error('SnowflakeService: JSON decode error', [
-                    'error' => $exception->getMessage(),
-                    'url' => $response->getInfo('url'),
-                    'content_length' => mb_strlen($content, 'UTF-8'),
-                    'content_preview' => mb_substr($content, 0, 1000, 'UTF-8'),
-                    'content_type' => $headers['content-type'][0] ?? 'unknown',
-                    'content_encoding' => $headers['content-encoding'][0] ?? 'none'
-                ]);
-                
-                throw new JsonException(sprintf('%s for "%s".', $exception->getMessage(), $response->getInfo('url')), $exception->getCode());
+            // More efficient than using mb_ereg_replace for all characters
+            // Only clean if necessary - detect control chars first
+            if (preg_match('/[\x00-\x1F\x7F]/', $content)) {
+                $content = preg_replace('/[\x00-\x1F\x7F]/', '', $content);
             }
 
-            if (false === is_array($content)) {
-                throw new JsonException(sprintf('JSON content was expected to decode to an array, "%s" returned for "%s".', get_debug_type($content), $response->getInfo('url')));
-            }
-
+            // Decode with optimized options
+            $data = json_decode($content, true, 512, JSON_BIGINT_AS_STRING | JSON_THROW_ON_ERROR);
+            
             $statusCode = $response->getStatusCode();
             if ($statusCode >= 400) {
-                throw new Exception(sprintf('Snowflake error, %s returned with message: %s', $statusCode, $content["message"] ?? 'Unknown error'), $statusCode);
+                throw new Exception(sprintf(
+                    'Snowflake error, %s returned with message: %s', 
+                    $statusCode, 
+                    $data["message"] ?? 'Unknown error'
+                ), $statusCode);
             }
 
-            return $content;
+            return $data;
         } catch (Exception $e) {
             $this->handleError($e, 'Error converting response to array');
             throw $e;
@@ -838,45 +811,40 @@ class SnowflakeService
      */
     private function gzdecode(string $data): string
     {
-        $this->debugLog('SnowflakeService: Decompressing gzipped data', [
-            'data_length' => mb_strlen($data, 'UTF-8'),
-        ]);
-
-        try {
-            // First try using gzdecode
-            $result = gzdecode($data);
-            if ($result !== false) {
-                $this->debugLog('SnowflakeService: Successfully decompressed using gzdecode');
-                return $result;
-            }
-
-            // If gzdecode fails, try using inflate
-            $inflate = inflate_init(ZLIB_ENCODING_GZIP);
-            if ($inflate === false) {
-                throw new Exception('Failed to initialize inflate');
-            }
-            
-            $content = '';
-            $offset = 0;
-
-            do {
-                $chunk = inflate_add($inflate, mb_substr($data, $offset, null, 'UTF-8'));
-                if ($chunk === false) {
-                    throw new Exception('Failed to decompress chunk at offset ' . $offset);
-                }
-                $content .= $chunk;
-
-                if (ZLIB_STREAM_END === inflate_get_status($inflate)) {
-                    $offset += inflate_get_read_len($inflate);
-                }
-            } while ($offset < mb_strlen($data, 'UTF-8'));
-
-            $this->debugLog('SnowflakeService: Successfully decompressed using inflate');
-            return $content;
-        } catch (Exception $e) {
-            $this->handleError($e, 'Error decompressing data');
-            throw $e;
+        // First try native function which is more efficient
+        $result = @gzdecode($data);
+        if ($result !== false) {
+            return $result;
         }
+
+        // Only use fallback when necessary
+        $inflate = inflate_init(ZLIB_ENCODING_GZIP);
+        if ($inflate === false) {
+            throw new Exception('Failed to initialize inflate');
+        }
+        
+        // Process larger chunks to reduce iterations
+        $content = '';
+        $chunkSize = 8192; // 8KB chunks instead of byte-by-byte
+        $offset = 0;
+        $dataLength = mb_strlen($data, 'UTF-8');
+        
+        do {
+            $chunk = inflate_add(
+                $inflate, 
+                mb_substr($data, $offset, min($chunkSize, $dataLength - $offset), 'UTF-8')
+            );
+            if ($chunk === false) {
+                throw new Exception('Failed to decompress chunk at offset ' . $offset);
+            }
+            $content .= $chunk;
+
+            if (ZLIB_STREAM_END === inflate_get_status($inflate)) {
+                $offset += inflate_get_read_len($inflate);
+            }
+        } while ($offset < $dataLength);
+        
+        return $content;
     }
 
     /**
@@ -895,5 +863,38 @@ class SnowflakeService
         ], $additionalData);
         
         Log::error('SnowflakeService: ' . $context, $errorData);
+    }
+
+    // Then modify the Trait's debugLog method to use this check
+    public function debugLog(string $message, array $context = []): void
+    {
+        if ($this->isDebugEnabled()) {
+            Log::debug($message, $context);
+        }
+    }
+
+    // Then add this method to efficiently determine debug state
+    private function isDebugEnabled(): bool
+    {
+        if ($this->isDebugEnabled === null) {
+            $this->isDebugEnabled = config('app.debug', false) || 
+                                  config('snowflake.debug_logging', false);
+        }
+        return $this->isDebugEnabled;
+    }
+
+    /**
+     * Generate a Snowflake API endpoint URL
+     */
+    private function buildApiUrl(string $endpoint, array $params = []): string
+    {
+        $baseUrl = sprintf('https://%s.snowflakecomputing.com/api/v2', $this->config->getAccount());
+        $fullUrl = $baseUrl . '/' . ltrim($endpoint, '/');
+        
+        if (!empty($params)) {
+            $fullUrl .= '?' . http_build_query($params);
+        }
+        
+        return $fullUrl;
     }
 }
