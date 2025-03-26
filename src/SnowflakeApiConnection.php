@@ -216,50 +216,41 @@ class SnowflakeApiConnection extends Connection
      */
     private function replaceBindings($query, array $bindings = [])
     {
-        $this->debugLog('SnowflakeApiConnection: Replacing bindings', [
-            'query' => $query,
-            'bindings_count' => count($bindings)
-        ]);
-
         if (empty($bindings)) {
-            $this->debugLog('SnowflakeApiConnection: No bindings to replace');
             return $query;
         }
 
-        try {
-            $bindingIndex = 0;
-            $result = mb_ereg_replace_callback('\?', function () use ($bindings, &$bindingIndex) {
-                $value = $bindings[$bindingIndex++] ?? '';
-
-                $this->debugLog('SnowflakeApiConnection: Replacing binding', [
-                    'index' => $bindingIndex - 1,
-                    'value_type' => gettype($value)
-                ]);
-
-                if (is_string($value)) {
-                    return "'" . mb_ereg_replace("'", "''", $value, 'm') . "'";
-                } elseif (is_bool($value)) {
-                    return $value ? 'true' : 'false';
-                } elseif (is_null($value)) {
-                    return 'null';
-                }
-
-                return $value;
-            }, $query, 'm');
-
-            $this->debugLog('SnowflakeApiConnection: Bindings replaced successfully', [
-                'result_query' => $result
-            ]);
-
-            return $result;
-        } catch (Exception $e) {
-            Log::error('SnowflakeApiConnection: Error replacing bindings', [
-                'query' => $query,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw $e;
+        $positions = [];
+        $offset = 0;
+        while (($pos = mb_strpos($query, '?', $offset)) !== false) {
+            $positions[] = $pos;
+            $offset = $pos + 1;
         }
+
+        $queryParts = [];
+        $prevPos = 0;
+        foreach ($positions as $i => $pos) {
+            $queryParts[] = mb_substr($query, $prevPos, $pos - $prevPos);
+            $queryParts[] = $this->formatBinding($bindings[$i] ?? '');
+            $prevPos = $pos + 1;
+        }
+        $queryParts[] = mb_substr($query, $prevPos);
+
+        return implode('', $queryParts);
+    }
+
+    private function formatBinding($value)
+    {
+        if (is_string($value)) {
+            return "'" . str_replace("'", "''", $value) . "'";
+        }
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+        if (is_null($value)) {
+            return 'null';
+        }
+        return $value;
     }
 
     /**

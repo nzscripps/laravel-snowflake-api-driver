@@ -158,26 +158,15 @@ class SnowflakeService
             $startTime = time();
             while (!$result->isExecuted()) {
                 $timeElapsed = time() - $startTime;
-                $this->debugLog('SnowflakeService: Waiting for execution to complete', [
-                    'statementId' => $statementId,
-                    'timeElapsed' => $timeElapsed,
-                    'timeout' => $this->config->getTimeout(),
-                ]);
-
+                
                 if ($timeElapsed >= $this->config->getTimeout()) {
-                    Log::warning('SnowflakeService: Query execution timed out', [
-                        'statementId' => $statementId,
-                        'timeout' => $this->config->getTimeout(),
-                    ]);
                     $this->cancelStatement($statementId);
                     return collect();
                 }
 
-                sleep(1); // Sleep for 1 second
+                // Reduce blocking time
+                usleep(250000); // 0.25 seconds instead of 1
                 $result = $this->getResult($statementId);
-                $this->debugLog('SnowflakeService: Checked result status', [
-                    'executed' => $result->isExecuted(),
-                ]);
             }
 
             // Process result once all pages have been collected

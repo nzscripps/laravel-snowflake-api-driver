@@ -192,55 +192,33 @@ class Result
      */
     public function toArray()
     {
-        $this->debugLog('Result: Converting to array', [
-            'data_count' => count($this->data),
-            'fields_count' => count($this->fields)
-        ]);
+        $this->debugLog('Result: Converting to array');
         
-        // Early return for empty datasets
         if (empty($this->data)) {
             return [];
         }
-        
-        // Pre-process field mapping once outside the loop
+
         $fieldMap = [];
         $fieldTypes = [];
-        
         foreach ($this->fields as $index => $field) {
             $fieldMap[$index] = $field['name'] ?? "column_$index";
             $fieldTypes[$index] = $field['type'] ?? null;
         }
-        
-        // Transform data to associative arrays with column names as keys
-        $result = array_map(function($row) use ($fieldMap, $fieldTypes) {
+
+        $result = [];
+        foreach ($this->data as $row) {
             $rowData = [];
-            
-            // Process each field once
             foreach ($fieldMap as $index => $columnName) {
-                // Handle missing values
-                if (!isset($row[$index])) {
-                    $rowData[$columnName] = null;
-                    continue;
-                }
+                $value = $row[$index] ?? null;
                 
-                $value = $row[$index];
-                
-                // Unwrap Item objects
-                if (is_array($value) && count($value) === 1 && isset($value['Item'])) {
-                    $value = $value['Item'];
-                }
-                
-                // Get the type and convert value
-                $type = $fieldTypes[$index];
-                $rowData[$columnName] = $this->convertToNativeType($value, $type);
+                // Optimized type conversion
+                $rowData[$columnName] = $this->convertToNativeType(
+                    is_array($value) && isset($value['Item']) ? $value['Item'] : $value,
+                    $fieldTypes[$index]
+                );
             }
-            
-            return $rowData;
-        }, $this->data);
-        
-        $this->debugLog('Result: Transformed data to array format', [
-            'result_count' => count($result)
-        ]);
+            $result[] = $rowData;
+        }
         
         return $result;
     }
@@ -254,143 +232,44 @@ class Result
      */
     protected function convertToNativeType($value, $type = null)
     {
-        $this->debugLog('Result: Starting type conversion', [
-            'value' => $value,
-            'type' => $type,
-            'value_type' => gettype($value)
-        ]);
-
-        // Handle null values
         if ($value === null) {
-            $this->debugLog('Result: Converting null value');
             return null;
         }
-        
-        // Handle boolean values
-        if (is_string($value) && ($type === 'BOOLEAN' || strtolower($value) === 'true' || strtolower($value) === 'false')) {
-            $result = filter_var($value, FILTER_VALIDATE_BOOLEAN);
-            $this->debugLog('Result: Converting boolean value', [
-                'input' => $value,
-                'output' => $result
-            ]);
-            return $result;
+
+        // Single check for wrapped values
+        if (is_array($value) && isset($value['Item'])) {
+            $value = $value['Item'];
         }
 
-        // Handle date/time string formats (now that Snowflake returns formatted strings)
-        if (is_string($value) && in_array($type, ['DATE', 'TIME', 'TIMESTAMP', 'TIMESTAMP_NTZ', 'TIMESTAMP_LTZ', 'TIMESTAMP_TZ'])) {
-            try {
-                $this->debugLog('Result: Processing date/time value', [
-                    'value' => $value,
-                    'type' => $type
-                ]);
-
-                // Use a consistent approach for all date/time types
-                switch ($type) {
-                    case 'DATE':
-                        // Format: YYYY-MM-DD
-                        $result = new \DateTime($value . ' 00:00:00');
-                        $this->debugLog('Result: Converted DATE value', [
-                            'input' => $value,
-                            'output' => $result->format('Y-m-d')
-                        ]);
-                        return $result;
-                        
-                    case 'TIME':
-                        // Format: HH:MI:SS.FF
-                        $result = new \DateTime('1970-01-01 ' . $value);
-                        $this->debugLog('Result: Converted TIME value', [
-                            'input' => $value,
-                            'output' => $result->format('H:i:s.u')
-                        ]);
-                        return $result;
-                        
-                    case 'TIMESTAMP':
-                    case 'TIMESTAMP_NTZ':
-                    case 'TIMESTAMP_LTZ':
-                    case 'TIMESTAMP_TZ':
-                        // Format: YYYY-MM-DD HH:MI:SS.FF [TZH:TZM]
-                        $result = new \DateTime($value);
-                        $this->debugLog('Result: Converted TIMESTAMP value', [
-                            'input' => $value,
-                            'output' => $result->format('Y-m-d H:i:s.u'),
-                            'timezone' => $result->getTimezone()->getName()
-                        ]);
-                        return $result;
-                }
-            } catch (\Exception $e) {
-                // Log the error but return original value if date parsing fails
-                Log::warning('Failed to parse date/time value', [
-                    'value' => $value,
-                    'type' => $type,
-                    'error' => $e->getMessage()
-                ]);
-                $this->debugLog('Result: Date/time parsing failed', [
-                    'value' => $value,
-                    'type' => $type,
-                    'error' => $e->getMessage()
-                ]);
+        // Optimized type handling
+        switch(true) {
+            case $type === 'BOOLEAN':
+                return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                
+            case in_array($type, ['DATE', 'TIME', 'TIMESTAMP']):
+                return $this->parseDateTime($value, $type);
+                
+            case is_numeric($value):
+                return strpos($value, '.') !== false ? (float)$value : (int)$value;
+                
+            default:
                 return $value;
-            }
         }
+    }
 
-        // Fallback handling for numeric date values (shouldn't happen with new API parameter settings, but kept for safety)
-        if (($type === 'DATE' || strpos($type, 'TIMESTAMP') === 0) && 
-            (is_numeric($value) || (is_string($value) && is_numeric($value)))) {
+    private function parseDateTime($value, $type)
+    {
+        try {
+            $formats = [
+                'DATE' => 'Y-m-d',
+                'TIME' => 'H:i:s.u',
+                'TIMESTAMP' => 'Y-m-d H:i:s.u'
+            ];
             
-            try {
-                $numericValue = is_numeric($value) ? $value : (int)$value;
-                $this->debugLog('Result: Processing numeric date/timestamp value', [
-                    'value' => $value,
-                    'numeric_value' => $numericValue,
-                    'type' => $type
-                ]);
-                
-                if ($type === 'DATE') {
-                    // Convert epoch days to DateTime
-                    $dateTime = new \DateTime('1970-01-01');
-                    $dateTime->modify("+$numericValue days");
-                    return $dateTime;
-                }
-                
-                if (strpos($type, 'TIMESTAMP') === 0) {
-                    // Convert epoch microseconds to DateTime
-                    $seconds = floor($numericValue / 1000000);
-                    $microseconds = $numericValue % 1000000;
-                    return \DateTime::createFromFormat('U.u', sprintf('%d.%06d', $seconds, $microseconds));
-                }
-            } catch (\Exception $e) {
-                $this->debugLog('Result: Numeric date/time parsing failed', [
-                    'value' => $value,
-                    'type' => $type,
-                    'error' => $e->getMessage()
-                ]);
-            }
+            return \DateTime::createFromFormat($formats[$type], $value) ?: $value;
+        } catch (\Exception $e) {
+            return $value;
         }
-        
-        // Handle numeric values
-        if (is_string($value) && is_numeric($value)) {
-            // Integer types
-            if (in_array($type, ['INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT'])) {
-                return (int)$value;
-            }
-            
-            // Float types
-            if (in_array($type, ['FLOAT', 'DOUBLE', 'DECIMAL', 'NUMERIC', 'REAL'])) {
-                return (float)$value;
-            }
-            
-            // Auto-detect numeric types
-            if (filter_var($value, FILTER_VALIDATE_INT) !== false) {
-                return (int)$value;
-            }
-            
-            if (filter_var($value, FILTER_VALIDATE_FLOAT) !== false) {
-                return (float)$value;
-            }
-        }
-        
-        // Return original value for all other types
-        return $value;
     }
 
     /**
