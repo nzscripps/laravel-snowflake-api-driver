@@ -235,6 +235,21 @@ class SnowflakeService
      */
     private function getAccessToken(): string
     {
+        // Use static cache for token across instances
+        static $staticTokenCache = null;
+        static $staticTokenExpiry = 0;
+        
+        // Check static cache first for performance
+        if ($staticTokenCache && time() < $staticTokenExpiry - 60) { // 1 minute buffer
+            $this->debugLog('SnowflakeService: Using static cached access token');
+            
+            // Also set instance properties for backward compatibility
+            $this->cachedToken = $staticTokenCache;
+            $this->tokenExpiry = $staticTokenExpiry;
+            
+            return $staticTokenCache;
+        }
+        
         // Generate a cache key based on account and user
         $cacheKey = "snowflake_api_token:{$this->config->getAccount()}:{$this->config->getUser()}";
         
@@ -251,6 +266,10 @@ class SnowflakeService
             // Also set instance properties for backward compatibility
             $this->cachedToken = $cachedTokenData['token'];
             $this->tokenExpiry = $cachedTokenData['expiry'];
+            
+            // Update static cache
+            $staticTokenCache = $cachedTokenData['token'];
+            $staticTokenExpiry = $cachedTokenData['expiry'];
             
             return $cachedTokenData['token'];
         }
@@ -332,9 +351,13 @@ class SnowflakeService
             $serializer = new CompactSerializer();
             $access_token = $serializer->serialize($jws);
 
-            // Cache the token and its expiry in both instance properties and Laravel cache
+            // Cache the token and its expiry in instance properties, Laravel cache, and static cache
             $this->cachedToken = $access_token;
             $this->tokenExpiry = $expires_in;
+            
+            // Update static cache
+            $staticTokenCache = $access_token;
+            $staticTokenExpiry = $expires_in;
             
             // Store token in Laravel cache with expiry
             $cacheData = [
