@@ -95,7 +95,14 @@ class SnowflakeService
             $timeout
         );
         
-        $this->httpClient = HttpClient::create();
+        // Configure HTTP client with persistent connections
+        $this->httpClient = HttpClient::create([
+            'max_host_connections' => 5,
+            'max_connections' => 10,
+            'timeout' => $timeout,
+            'http_version' => '2.0',
+            'persistent_connections' => true
+        ]);
         
         $this->debugLog('SnowflakeService: Initialized', [
             'baseUrl' => $this->config->getBaseUrl(),
