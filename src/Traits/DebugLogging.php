@@ -15,7 +15,7 @@ trait DebugLogging
      */
     protected function debugLog(string $message, array $context = []): void
     {
-        if (env('SF_DEBUG', false)) {
+        if (env('SF_DEBUG', true)) {
             Log::info($message, $context);
         }
     }
