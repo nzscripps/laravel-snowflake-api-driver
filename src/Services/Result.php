@@ -129,14 +129,14 @@ class Result
             'existing_data_count' => count($this->data),
             'new_data_count' => count($pageData)
         ]);
-        
+
         // Append the new data to the existing data array
         $this->data = array_merge($this->data, $pageData);
-        
+
         $this->debugLog('Result: Data merged successfully', [
             'total_data_count' => count($this->data)
         ]);
-        
+
         return $this;
     }
 
@@ -193,7 +193,7 @@ class Result
     public function toArray()
     {
         $this->debugLog('Result: Converting to array');
-        
+
         if (empty($this->data)) {
             return [];
         }
@@ -210,7 +210,7 @@ class Result
             $rowData = [];
             foreach ($fieldMap as $index => $columnName) {
                 $value = $row[$index] ?? null;
-                
+
                 // Optimized type conversion
                 $rowData[$columnName] = $this->convertToNativeType(
                     is_array($value) && isset($value['Item']) ? $value['Item'] : $value,
@@ -219,7 +219,7 @@ class Result
             }
             $result[] = $rowData;
         }
-        
+
         return $result;
     }
 
@@ -241,17 +241,19 @@ class Result
             $value = $value['Item'];
         }
 
+        $type = strtoupper($type);
+
         // Optimized type handling
         switch(true) {
             case $type === 'BOOLEAN':
                 return filter_var($value, FILTER_VALIDATE_BOOLEAN);
-                
+
             case in_array($type, ['DATE', 'TIME', 'TIMESTAMP']):
                 return $this->parseDateTime($value, $type);
-                
+
             case is_numeric($value):
                 return strpos($value, '.') !== false ? (float)$value : (int)$value;
-                
+
             default:
                 return $value;
         }
@@ -265,7 +267,7 @@ class Result
                 'TIME' => 'H:i:s.u',
                 'TIMESTAMP' => 'Y-m-d H:i:s.u'
             ];
-            
+
             return \DateTime::createFromFormat($formats[$type], $value) ?: $value;
         } catch (\Exception $e) {
             return $value;
