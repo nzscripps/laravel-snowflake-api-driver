@@ -267,7 +267,70 @@ class Result
             return $result;
         }
 
-        // Handle date/time types
+        // Special handling for Snowflake dates returned as epoch day numbers
+        if (($type === 'DATE' || $type === 'TIMESTAMP' || $type === 'TIMESTAMP_NTZ' || 
+             $type === 'TIMESTAMP_LTZ' || $type === 'TIMESTAMP_TZ') && 
+            (is_numeric($value) || (is_string($value) && is_numeric($value)))) {
+            
+            try {
+                $numericValue = is_numeric($value) ? $value : (int)$value;
+                $this->debugLog('Result: Processing numeric date/timestamp value', [
+                    'value' => $value,
+                    'numeric_value' => $numericValue,
+                    'type' => $type
+                ]);
+                
+                // For DATE type: Snowflake epoch day numbers (days since 1970-01-01)
+                if ($type === 'DATE') {
+                    // Convert epoch days to DateTime
+                    $dateTime = new \DateTime('1970-01-01');
+                    $dateTime->modify("+$numericValue days");
+                    
+                    $this->debugLog('Result: Converted numeric DATE value', [
+                        'input' => $value,
+                        'epoch_days' => $numericValue,
+                        'output' => $dateTime->format('Y-m-d'),
+                        'timezone' => $dateTime->getTimezone()->getName()
+                    ]);
+                    
+                    return $dateTime;
+                }
+                
+                // For TIMESTAMP types: Snowflake epoch microseconds (microseconds since 1970-01-01)
+                if (strpos($type, 'TIMESTAMP') === 0) {
+                    // Convert epoch microseconds to DateTime
+                    $seconds = floor($numericValue / 1000000);
+                    $microseconds = $numericValue % 1000000;
+                    
+                    $dateTime = \DateTime::createFromFormat('U.u', sprintf('%d.%06d', $seconds, $microseconds));
+                    
+                    $this->debugLog('Result: Converted numeric TIMESTAMP value', [
+                        'input' => $value,
+                        'epoch_microseconds' => $numericValue,
+                        'seconds' => $seconds,
+                        'microseconds' => $microseconds,
+                        'output' => $dateTime->format('Y-m-d H:i:s.u'),
+                        'timezone' => $dateTime->getTimezone()->getName()
+                    ]);
+                    
+                    return $dateTime;
+                }
+            } catch (\Exception $e) {
+                Log::warning('Failed to parse numeric date/time value', [
+                    'value' => $value,
+                    'type' => $type,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                $this->debugLog('Result: Numeric date/time parsing failed', [
+                    'value' => $value,
+                    'type' => $type,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        // Handle string date/time types
         if (is_string($value)) {
             try {
                 $this->debugLog('Result: Processing date/time value', [
