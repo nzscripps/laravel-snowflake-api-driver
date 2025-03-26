@@ -433,8 +433,16 @@ class SnowflakeService
                 'database' => $this->config->getDatabase(),
                 'schema' => $this->config->getSchema(),
                 'resultSetMetaData' => [
-                    'format' => 'jsonv2',
+                    'format' => 'json',
                 ],
+                'parameters' => [
+                    'DATE_OUTPUT_FORMAT' => 'YYYY-MM-DD',
+                    'TIME_OUTPUT_FORMAT' => 'HH24:MI:SS.FF',
+                    'TIMESTAMP_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF',
+                    'TIMESTAMP_NTZ_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF',
+                    'TIMESTAMP_LTZ_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM',
+                    'TIMESTAMP_TZ_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM'
+                ]
             ];
             
             $content = $this->makeRequest('POST', $url, [
