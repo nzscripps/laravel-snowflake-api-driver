@@ -184,27 +184,28 @@ class SnowflakeService
             if ($result->getPageTotal() > 1) {
                 $this->debugLog('SnowflakeService: Multiple pages detected, retrieving all pages');
                 
-                // Create requests without executing them yet
+                // Create and process requests concurrently
                 $responses = [];
-                for ($page = 2; $page <= $result->getPageTotal(); $page++) {
-                    $this->debugLog('SnowflakeService: Preparing request for page ' . $page);
+                foreach (range(2, $result->getPageTotal()) as $page) {
                     $url = sprintf(
                         'https://%s.snowflakecomputing.com/api/v2/statements/%s?%s', 
                         $this->config->getAccount(), 
                         $statementId, 
                         http_build_query(['partition' => $page - 1])
                     );
-                    
                     $responses[$page] = $this->httpClient->request('GET', $url, [
                         'headers' => $this->getHeaders()
                     ]);
                 }
-                
-                // Process the responses
-                foreach ($responses as $page => $response) {
-                    $pageData = $this->toArray($response);
-                    $result->addPageData($pageData['data'] ?? []);
-                    $this->debugLog('SnowflakeService: Retrieved page ' . $page);
+
+                // Process responses as they complete
+                foreach ($this->httpClient->stream($responses) as $response => $chunk) {
+                    if ($chunk->isFirst()) {
+                        $this->debugLog('SnowflakeService: Started receiving page response');
+                    } elseif ($chunk->isLast()) {
+                        $pageData = $this->toArray($response);
+                        $result->addPageData($pageData['data'] ?? []);
+                    }
                 }
             }
             
