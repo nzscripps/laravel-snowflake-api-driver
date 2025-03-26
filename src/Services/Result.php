@@ -245,30 +245,62 @@ class Result
      */
     protected function convertToNativeType($value, $type = null)
     {
+        $this->debugLog('Result: Starting type conversion', [
+            'value' => $value,
+            'type' => $type,
+            'value_type' => gettype($value)
+        ]);
+
         // Handle null values
         if ($value === null) {
+            $this->debugLog('Result: Converting null value');
             return null;
         }
         
         // Handle boolean values
         if (is_string($value) && ($type === 'BOOLEAN' || strtolower($value) === 'true' || strtolower($value) === 'false')) {
-            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+            $result = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+            $this->debugLog('Result: Converting boolean value', [
+                'input' => $value,
+                'output' => $result
+            ]);
+            return $result;
         }
 
         // Handle date/time types
         if (is_string($value)) {
             try {
+                $this->debugLog('Result: Processing date/time value', [
+                    'value' => $value,
+                    'type' => $type
+                ]);
+
                 switch ($type) {
                     case 'DATE':
                         // Handle dates like '2014-12-30'
-                        return new \DateTime($value . ' 00:00:00');
+                        $result = new \DateTime($value . ' 00:00:00');
+                        $this->debugLog('Result: Converted DATE value', [
+                            'input' => $value,
+                            'output' => $result->format('Y-m-d H:i:s'),
+                            'timezone' => $result->getTimezone()->getName()
+                        ]);
+                        return $result;
                         
                     case 'TIME':
                         // Handle times like '00:29:01.000' or '00:30'
                         if (preg_match('/^\d{2}:\d{2}(:\d{2})?(\.\d{3})?$/', $value)) {
                             // Append date to make it a valid DateTime
-                            return new \DateTime('1970-01-01 ' . $value);
+                            $result = new \DateTime('1970-01-01 ' . $value);
+                            $this->debugLog('Result: Converted TIME value', [
+                                'input' => $value,
+                                'output' => $result->format('H:i:s.u'),
+                                'timezone' => $result->getTimezone()->getName()
+                            ]);
+                            return $result;
                         }
+                        $this->debugLog('Result: Invalid TIME format', [
+                            'value' => $value
+                        ]);
                         break;
                         
                     case 'TIMESTAMP':
@@ -277,13 +309,30 @@ class Result
                     case 'TIMESTAMP_TZ':  // Timestamp with timezone
                         // Handle datetime strings like '2024-11-06 00:00:00'
                         if (strpos($value, ' ') !== false) {
-                            return new \DateTime($value);
+                            $result = new \DateTime($value);
+                            $this->debugLog('Result: Converted TIMESTAMP value', [
+                                'input' => $value,
+                                'output' => $result->format('Y-m-d H:i:s.u'),
+                                'timezone' => $result->getTimezone()->getName(),
+                                'timestamp_type' => $type
+                            ]);
+                            return $result;
                         }
+                        $this->debugLog('Result: Invalid TIMESTAMP format', [
+                            'value' => $value,
+                            'type' => $type
+                        ]);
                         break;
                 }
             } catch (\Exception $e) {
                 // Log the error but return original value if date parsing fails
                 Log::warning('Failed to parse date/time value', [
+                    'value' => $value,
+                    'type' => $type,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                $this->debugLog('Result: Date/time parsing failed', [
                     'value' => $value,
                     'type' => $type,
                     'error' => $e->getMessage()
@@ -294,27 +343,58 @@ class Result
         
         // Handle numeric values
         if (is_string($value) && is_numeric($value)) {
+            $this->debugLog('Result: Processing numeric value', [
+                'value' => $value,
+                'type' => $type
+            ]);
+
             // Integer
             if ($type === 'INTEGER' || $type === 'BIGINT' || $type === 'SMALLINT' || $type === 'TINYINT') {
-                return (int)$value;
+                $result = (int)$value;
+                $this->debugLog('Result: Converted to integer', [
+                    'input' => $value,
+                    'output' => $result,
+                    'type' => $type
+                ]);
+                return $result;
             }
             
             // Float/double/decimal - use float for PHP representation
             if ($type === 'FLOAT' || $type === 'DOUBLE' || $type === 'DECIMAL' || $type === 'NUMERIC' || $type === 'REAL') {
-                return (float)$value;
+                $result = (float)$value;
+                $this->debugLog('Result: Converted to float', [
+                    'input' => $value,
+                    'output' => $result,
+                    'type' => $type
+                ]);
+                return $result;
             }
             
             // For other numeric-looking strings, convert to appropriate type
             if (filter_var($value, FILTER_VALIDATE_INT) !== false) {
-                return (int)$value;
+                $result = (int)$value;
+                $this->debugLog('Result: Auto-converted to integer', [
+                    'input' => $value,
+                    'output' => $result
+                ]);
+                return $result;
             }
             
             if (filter_var($value, FILTER_VALIDATE_FLOAT) !== false) {
-                return (float)$value;
+                $result = (float)$value;
+                $this->debugLog('Result: Auto-converted to float', [
+                    'input' => $value,
+                    'output' => $result
+                ]);
+                return $result;
             }
         }
         
         // Return original value for other types
+        $this->debugLog('Result: Returning original value', [
+            'value' => $value,
+            'type' => $type
+        ]);
         return $value;
     }
 
