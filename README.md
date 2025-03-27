@@ -85,6 +85,55 @@ $results = DB::connection('snowflake_api')
 - Supports all standard Eloquent operations
 - SQL queries are translated to Snowflake syntax
 - No need for PDO or ODBC drivers to be installed
+- Optimized for performance with parallel page processing
+- Smart caching of authentication tokens
+
+## Performance Optimizations
+
+The driver includes several optimizations to improve performance:
+
+- **Parallel API Requests**: Multiple result pages are fetched concurrently
+- **Token Caching**: JWT tokens are cached to reduce authentication overhead
+- **Efficient Type Conversion**: Smart mapping of Snowflake types to PHP types
+- **Non-blocking Operations**: Improved polling for query results
+- **Memory Optimization**: Efficient data structures and processing
+
+For detailed information about optimizations, see [OPTIMIZATIONS.md](OPTIMIZATIONS.md).
+
+## Testing
+
+The package includes a comprehensive test suite:
+
+```bash
+# Run all tests
+composer test
+
+# Run only unit tests
+composer test:unit
+
+# Run only integration tests
+composer test:integration
+```
+
+For detailed information about testing, see [TESTING.md](TESTING.md).
+
+## Debug Logging
+
+You can enable debug logging to troubleshoot issues:
+
+```php
+// In your .env file
+SNOWFLAKE_DEBUG_LOGGING=true
+```
+
+Or configure it in your application's configuration:
+
+```php
+// config/snowflake.php
+return [
+    'debug_logging' => env('SNOWFLAKE_DEBUG_LOGGING', false),
+];
+```
 
 ## Requirements
 
