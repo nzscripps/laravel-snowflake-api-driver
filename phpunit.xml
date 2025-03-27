@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="./vendor/phpunit/phpunit/phpunit.xsd"
+    bootstrap="vendor/autoload.php"
+    colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory suffix="Test.php">./tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Integration">
+            <directory suffix="Test.php">./tests/Integration</directory>
+        </testsuite>
+    </testsuites>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <!-- Snowflake integration test config -->
+        <env name="SNOWFLAKE_TEST_URL" value=""/>
+        <env name="SNOWFLAKE_TEST_ACCOUNT" value=""/>
+        <env name="SNOWFLAKE_TEST_USER" value=""/>
+        <env name="SNOWFLAKE_TEST_PUBLIC_KEY" value=""/>
+        <env name="SNOWFLAKE_TEST_PRIVATE_KEY" value=""/>
+        <env name="SNOWFLAKE_TEST_PASSPHRASE" value=""/>
+        <env name="SNOWFLAKE_TEST_WAREHOUSE" value=""/>
+        <env name="SNOWFLAKE_TEST_DATABASE" value=""/>
+        <env name="SNOWFLAKE_TEST_SCHEMA" value=""/>
+    </php>
+</phpunit> 

@@ -1,0 +1,60 @@
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        php: [7.4, 8.0, 8.1]
+        laravel: [8.*, 9.*, 10.*]
+        exclude:
+          - php: 7.4
+            laravel: 10.*
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo
+          coverage: none
+
+      - name: Get Composer Cache Directory
+        id: composer-cache
+        run: echo "::set-output name=dir::$(composer config cache-files-dir)"
+
+      - name: Cache dependencies
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Update composer
+        run: composer self-update
+
+      - name: Install Dependencies
+        run: composer install --no-ansi --no-interaction --no-progress
+
+      - name: Execute Unit Tests
+        run: composer test:unit
+
+      # Integration tests run only on main branch with secrets
+      - name: Execute Integration Tests
+        if: github.ref == 'refs/heads/main'
+        env:
+          SNOWFLAKE_TEST_URL: ${{ secrets.SNOWFLAKE_TEST_URL }}
+          SNOWFLAKE_TEST_ACCOUNT: ${{ secrets.SNOWFLAKE_TEST_ACCOUNT }}
+          SNOWFLAKE_TEST_USER: ${{ secrets.SNOWFLAKE_TEST_USER }}
+          SNOWFLAKE_TEST_PUBLIC_KEY: ${{ secrets.SNOWFLAKE_TEST_PUBLIC_KEY }}
+          SNOWFLAKE_TEST_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_TEST_PRIVATE_KEY }}
+          SNOWFLAKE_TEST_PASSPHRASE: ${{ secrets.SNOWFLAKE_TEST_PASSPHRASE }}
+          SNOWFLAKE_TEST_WAREHOUSE: ${{ secrets.SNOWFLAKE_TEST_WAREHOUSE }}
+          SNOWFLAKE_TEST_DATABASE: ${{ secrets.SNOWFLAKE_TEST_DATABASE }}
+          SNOWFLAKE_TEST_SCHEMA: ${{ secrets.SNOWFLAKE_TEST_SCHEMA }}
+        run: composer test:integration
