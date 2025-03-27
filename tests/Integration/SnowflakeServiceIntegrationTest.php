@@ -117,17 +117,17 @@ class SnowflakeServiceIntegrationTest extends TestCase
         $this->assertEquals('test1', $result->first()['STRING_COL']);
         $this->assertTrue($result->first()['BOOL_COL']);
         
-        // Assert date format (should be DateTime object with correct format)
-        $this->assertInstanceOf(\DateTime::class, $result->first()['DATE_COL']);
-        $this->assertEquals('2023-01-01', $result->first()['DATE_COL']->format('Y-m-d'));
+        // Assert date format (should be a string in correct format)
+        $this->assertIsString($result->first()['DATE_COL']);
+        $this->assertEquals('2023-01-01', $result->first()['DATE_COL']);
         
-        // Assert time format (should be DateTime object with correct format)
-        $this->assertInstanceOf(\DateTime::class, $result->first()['TIME_COL']);
-        $this->assertEquals('12:34:56', $result->first()['TIME_COL']->format('H:i:s'));
+        // Assert time format (should be a string in correct format)
+        $this->assertIsString($result->first()['TIME_COL']);
+        $this->assertEquals('12:34:56', $result->first()['TIME_COL']);
         
-        // Assert datetime format (should be DateTime object with correct format)
-        $this->assertInstanceOf(\DateTime::class, $result->first()['DATETIME_COL']);
-        $this->assertEquals('2023-01-01 12:34:56', $result->first()['DATETIME_COL']->format('Y-m-d H:i:s'));
+        // Assert datetime format (should be a string in correct format)
+        $this->assertIsString($result->first()['DATETIME_COL']);
+        $this->assertEquals('2023-01-01 12:34:56', $result->first()['DATETIME_COL']);
     }
     
     /** @test */
@@ -162,18 +162,18 @@ class SnowflakeServiceIntegrationTest extends TestCase
         $firstRow = $result->first();
         
         // Date assertions
-        $this->assertInstanceOf(\DateTime::class, $firstRow['DATE_COL']);
-        $this->assertEquals('2023-01-01', $firstRow['DATE_STR']);
-        $this->assertEquals('2023-01-01', $firstRow['DATE_COL']->format('Y-m-d'));
+        $this->assertIsString($firstRow['DATE_COL']);
+        $this->assertEquals($firstRow['DATE_STR'], $firstRow['DATE_COL']);
+        $this->assertEquals('2023-01-01', $firstRow['DATE_COL']);
         
         // Time assertions
-        $this->assertInstanceOf(\DateTime::class, $firstRow['TIME_COL']);
-        $this->assertEquals('12:34:56', $firstRow['TIME_STR']);
-        $this->assertEquals('12:34:56', $firstRow['TIME_COL']->format('H:i:s'));
+        $this->assertIsString($firstRow['TIME_COL']);
+        $this->assertEquals($firstRow['TIME_STR'], $firstRow['TIME_COL']);
+        $this->assertEquals('12:34:56', $firstRow['TIME_COL']);
         
         // DateTime assertions
-        $this->assertInstanceOf(\DateTime::class, $firstRow['DATETIME_COL']);
-        $this->assertEquals('2023-01-01 12:34:56', $firstRow['DATETIME_STR']);
-        $this->assertEquals('2023-01-01 12:34:56', $firstRow['DATETIME_COL']->format('Y-m-d H:i:s'));
+        $this->assertIsString($firstRow['DATETIME_COL']);
+        $this->assertEquals($firstRow['DATETIME_STR'], $firstRow['DATETIME_COL']);
+        $this->assertEquals('2023-01-01 12:34:56', $firstRow['DATETIME_COL']);
     }
 } 

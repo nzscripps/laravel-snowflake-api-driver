@@ -139,6 +139,35 @@ This ensures no unnecessary logging in production environments.
 Note: Debug logging is controlled only by the `SNOWFLAKE_DEBUG_LOGGING` environment variable. 
 It is not affected by Laravel's `APP_DEBUG` setting or any other configuration values.
 
+## Date and Time Handling
+
+The Snowflake API driver automatically formats date and time values as strings with consistent formats:
+
+- **DATE**: Values are returned as strings in YYYY-MM-DD format (e.g., '2023-01-01')
+- **TIME**: Values are returned as strings in HH:MM:SS format (e.g., '12:34:56')
+- **TIMESTAMP/DATETIME**: Values are returned as strings in YYYY-MM-DD HH:MM:SS format (e.g., '2023-01-01 12:34:56')
+
+This makes it simple to work with date and time values without needing to handle conversions:
+
+```php
+// Example of working with date/time values
+$result = DB::select('SELECT * FROM my_table');
+
+// Using date values directly as strings
+$dateString = $result[0]->date_column; // '2023-01-01'
+
+// Using time values directly as strings
+$timeString = $result[0]->time_column; // '12:34:56'
+
+// Using datetime values directly as strings
+$datetimeString = $result[0]->datetime_column; // '2023-01-01 12:34:56'
+
+// You can also use Carbon if you need DateTime functionality
+$carbon = \Carbon\Carbon::parse($result[0]->datetime_column);
+```
+
+The driver ensures that all date and time values are consistently formatted for ease of use in your application.
+
 ## Requirements
 
 - PHP 7.3 or higher

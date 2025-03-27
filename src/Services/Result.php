@@ -250,6 +250,10 @@ class Result
 
             case in_array($type, ['DATE', 'TIME', 'TIMESTAMP']):
                 return $this->parseDateTime($value, $type);
+                
+            case strpos($type, 'TIME_') === 0:
+            case strpos($type, 'TIMESTAMP_') === 0:
+                return $this->parseDateTime($value, $type);
 
             case is_numeric($value):
                 return strpos($value, '.') !== false ? (float)$value : (int)$value;
@@ -262,41 +266,91 @@ class Result
     private function parseDateTime($value, $type)
     {
         try {
+            $this->debugLog('Result: Parsing date/time value', [
+                'value' => $value,
+                'type' => $type,
+                'is_string' => is_string($value),
+                'string_format' => is_string($value) ? strlen($value) : 'N/A'
+            ]);
+            
             // Define format mappings for different types
             $formats = [
                 'DATE' => 'Y-m-d',
-                'TIME' => 'H:i:s.u',
-                'TIME_NTZ' => 'H:i:s.u',
-                'TIMESTAMP' => 'Y-m-d H:i:s.u',
-                'TIMESTAMP_NTZ' => 'Y-m-d H:i:s.u',
-                'TIMESTAMP_LTZ' => 'Y-m-d H:i:s.u',
-                'TIMESTAMP_TZ' => 'Y-m-d H:i:s.u'
+                'TIME' => 'H:i:s',
+                'TIME_NTZ' => 'H:i:s',
+                'TIMESTAMP' => 'Y-m-d H:i:s',
+                'TIMESTAMP_NTZ' => 'Y-m-d H:i:s',
+                'TIMESTAMP_LTZ' => 'Y-m-d H:i:s',
+                'TIMESTAMP_TZ' => 'Y-m-d H:i:s'
             ];
             
-            // Get format for this type, default to timestamp format if not found
-            $format = $formats[$type] ?? 'Y-m-d H:i:s.u';
+            // Default format based on type
+            $format = $formats[$type] ?? 'Y-m-d H:i:s';
             
-            // Handle time values without microseconds
-            if (strpos($type, 'TIME') === 0 && !strpos($value, '.')) {
-                $format = 'H:i:s';
-            }
-            
-            $dateTime = \DateTime::createFromFormat($format, $value);
-            
-            if (!$dateTime) {
-                // Try alternate format without microseconds as fallback
-                if (strpos($format, '.u') !== false) {
-                    $alternateFmt = str_replace('.u', '', $format);
-                    $dateTime = \DateTime::createFromFormat($alternateFmt, $value);
+            // Handle cases when the value is already returned as a string format
+            if (is_string($value)) {
+                // For TIME values that are already in string format (usually with microseconds)
+                if (strpos($type, 'TIME') === 0 && preg_match('/^\d{2}:\d{2}:\d{2}(\.\d+)?$/', $value)) {
+                    $timeWithoutMicroseconds = preg_replace('/(\d{2}:\d{2}:\d{2})(\.\d+)?$/', '$1', $value);
+                    $this->debugLog('Result: Parsed TIME string value', [
+                        'original' => $value,
+                        'without_microseconds' => $timeWithoutMicroseconds
+                    ]);
+                    return $timeWithoutMicroseconds;
+                }
+                
+                // For TIMESTAMP/DATETIME values that are already in string format
+                if ((strpos($type, 'TIMESTAMP') === 0 || $type === 'DATETIME') && 
+                    preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/', $value)) {
+                    $datetimeWithoutMicroseconds = preg_replace('/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(\.\d+)?$/', '$1', $value);
+                    $this->debugLog('Result: Parsed TIMESTAMP string value', [
+                        'original' => $value,
+                        'without_microseconds' => $datetimeWithoutMicroseconds
+                    ]);
+                    return $datetimeWithoutMicroseconds;
+                }
+                
+                // For DATE values that are already in correct format
+                if (strpos($type, 'DATE') === 0 && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                    return $value;
                 }
             }
             
-            return $dateTime ?: $value;
+            // Create a DateTime object to help with formatting
+            $this->debugLog('Result: Attempting to create DateTime with format', [
+                'format' => $format . '.u',
+                'value' => $value
+            ]);
+            
+            // Try to create DateTime with microseconds
+            $dateTime = \DateTime::createFromFormat($format . '.u', $value);
+            
+            // If that fails, try without microseconds
+            if (!$dateTime) {
+                $this->debugLog('Result: First format failed, trying without microseconds', [
+                    'alternate_format' => $format
+                ]);
+                $dateTime = \DateTime::createFromFormat($format, $value);
+            }
+            
+            // If we successfully created a DateTime object, return formatted string
+            if ($dateTime) {
+                $formattedString = $dateTime->format($format);
+                $this->debugLog('Result: Successfully formatted date/time', [
+                    'formatted_string' => $formattedString
+                ]);
+                return $formattedString;
+            }
+            
+            // If all else fails, return original value
+            $this->debugLog('Result: Failed to format date/time, returning original value');
+            return $value;
         } catch (\Exception $e) {
             $this->debugLog('Result: Error parsing datetime', [
                 'value' => $value,
                 'type' => $type,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
             return $value;
         }

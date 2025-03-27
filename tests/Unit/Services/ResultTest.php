@@ -50,7 +50,8 @@ class ResultTest extends TestCase
         
         // Assert
         $this->assertIsBool($converted[0]['bool_col']);
-        $this->assertInstanceOf(\DateTime::class, $converted[0]['date_col']);
+        $this->assertIsString($converted[0]['date_col']);
+        $this->assertEquals('2023-01-01', $converted[0]['date_col']);
         $this->assertIsInt($converted[0]['num_col']);
     }
     
