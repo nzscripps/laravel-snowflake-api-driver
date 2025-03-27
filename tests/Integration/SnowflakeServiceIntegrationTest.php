@@ -112,10 +112,68 @@ class SnowflakeServiceIntegrationTest extends TestCase
         echo "\nTest Query Results from {$testTable}:\n";
         echo "Total rows: " . count($result) . "\n";
         
-        // Assert
+        // Assert basic data
         $this->assertCount(2, $result);
         $this->assertEquals('test1', $result->first()['STRING_COL']);
         $this->assertTrue($result->first()['BOOL_COL']);
+        
+        // Assert date format (should be DateTime object with correct format)
         $this->assertInstanceOf(\DateTime::class, $result->first()['DATE_COL']);
+        $this->assertEquals('2023-01-01', $result->first()['DATE_COL']->format('Y-m-d'));
+        
+        // Assert time format (should be DateTime object with correct format)
+        $this->assertInstanceOf(\DateTime::class, $result->first()['TIME_COL']);
+        $this->assertEquals('12:34:56', $result->first()['TIME_COL']->format('H:i:s'));
+        
+        // Assert datetime format (should be DateTime object with correct format)
+        $this->assertInstanceOf(\DateTime::class, $result->first()['DATETIME_COL']);
+        $this->assertEquals('2023-01-01 12:34:56', $result->first()['DATETIME_COL']->format('Y-m-d H:i:s'));
+    }
+    
+    /** @test */
+    public function it_formats_date_and_time_values_correctly()
+    {
+        // Skip if service not initialized
+        if (!$this->service) {
+            $this->markTestSkipped('Service not initialized');
+        }
+        
+        // Get the test table name
+        $testTable = $this->getTestTableName();
+        
+        // Act - test with explicit formatting
+        $result = $this->service->ExecuteQuery("
+            SELECT 
+                DATE_COL,
+                TO_VARCHAR(DATE_COL, 'YYYY-MM-DD') AS DATE_STR,
+                TIME_COL,
+                TO_VARCHAR(TIME_COL, 'HH24:MI:SS') AS TIME_STR,
+                DATETIME_COL,
+                TO_VARCHAR(DATETIME_COL, 'YYYY-MM-DD HH24:MI:SS') AS DATETIME_STR
+            FROM {$testTable}
+            WHERE id = 1
+        ");
+        
+        // Debug output
+        echo "\nDate/Time Format Test Results:\n";
+        print_r($result->first());
+        
+        // Assert
+        $firstRow = $result->first();
+        
+        // Date assertions
+        $this->assertInstanceOf(\DateTime::class, $firstRow['DATE_COL']);
+        $this->assertEquals('2023-01-01', $firstRow['DATE_STR']);
+        $this->assertEquals('2023-01-01', $firstRow['DATE_COL']->format('Y-m-d'));
+        
+        // Time assertions
+        $this->assertInstanceOf(\DateTime::class, $firstRow['TIME_COL']);
+        $this->assertEquals('12:34:56', $firstRow['TIME_STR']);
+        $this->assertEquals('12:34:56', $firstRow['TIME_COL']->format('H:i:s'));
+        
+        // DateTime assertions
+        $this->assertInstanceOf(\DateTime::class, $firstRow['DATETIME_COL']);
+        $this->assertEquals('2023-01-01 12:34:56', $firstRow['DATETIME_STR']);
+        $this->assertEquals('2023-01-01 12:34:56', $firstRow['DATETIME_COL']->format('Y-m-d H:i:s'));
     }
 } 

@@ -46,14 +46,16 @@ trait TestDataManager
                 id INTEGER,
                 string_col VARCHAR,
                 date_col DATE,
+                time_col TIME,
+                datetime_col TIMESTAMP_NTZ,
                 bool_col BOOLEAN
             )";
             $this->service->ExecuteQuery($createTable);
             
             Log::debug('TestDataManager: Inserting test data');
             $insertData = "INSERT INTO {$testTable} VALUES 
-                (1, 'test1', '2023-01-01', true),
-                (2, 'test2', '2023-01-02', false)";
+                (1, 'test1', '2023-01-01', '12:34:56', '2023-01-01 12:34:56', true),
+                (2, 'test2', '2023-01-02', '23:45:01', '2023-01-02 23:45:01', false)";
             $this->service->ExecuteQuery($insertData);
             
             // Verify table exists

@@ -262,14 +262,42 @@ class Result
     private function parseDateTime($value, $type)
     {
         try {
+            // Define format mappings for different types
             $formats = [
                 'DATE' => 'Y-m-d',
                 'TIME' => 'H:i:s.u',
-                'TIMESTAMP' => 'Y-m-d H:i:s.u'
+                'TIME_NTZ' => 'H:i:s.u',
+                'TIMESTAMP' => 'Y-m-d H:i:s.u',
+                'TIMESTAMP_NTZ' => 'Y-m-d H:i:s.u',
+                'TIMESTAMP_LTZ' => 'Y-m-d H:i:s.u',
+                'TIMESTAMP_TZ' => 'Y-m-d H:i:s.u'
             ];
-
-            return \DateTime::createFromFormat($formats[$type], $value) ?: $value;
+            
+            // Get format for this type, default to timestamp format if not found
+            $format = $formats[$type] ?? 'Y-m-d H:i:s.u';
+            
+            // Handle time values without microseconds
+            if (strpos($type, 'TIME') === 0 && !strpos($value, '.')) {
+                $format = 'H:i:s';
+            }
+            
+            $dateTime = \DateTime::createFromFormat($format, $value);
+            
+            if (!$dateTime) {
+                // Try alternate format without microseconds as fallback
+                if (strpos($format, '.u') !== false) {
+                    $alternateFmt = str_replace('.u', '', $format);
+                    $dateTime = \DateTime::createFromFormat($alternateFmt, $value);
+                }
+            }
+            
+            return $dateTime ?: $value;
         } catch (\Exception $e) {
+            $this->debugLog('Result: Error parsing datetime', [
+                'value' => $value,
+                'type' => $type,
+                'error' => $e->getMessage()
+            ]);
             return $value;
         }
     }
