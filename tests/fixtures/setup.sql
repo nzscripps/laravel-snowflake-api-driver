@@ -1,8 +1,8 @@
--- Create test schema
-CREATE SCHEMA IF NOT EXISTS test_schema;
+-- Use the existing schema (doesn't try to create a new one)
+-- No CREATE SCHEMA statement needed
 
--- Create test table
-CREATE OR REPLACE TABLE test_schema.test_table (
+-- Create test table with a unique name to avoid conflicts
+CREATE OR REPLACE TABLE SNOWFLAKE_API_TEST_TABLE (
     id INTEGER,
     string_col VARCHAR,
     date_col DATE,
@@ -10,7 +10,7 @@ CREATE OR REPLACE TABLE test_schema.test_table (
 );
 
 -- Insert test data
-INSERT INTO test_schema.test_table 
+INSERT INTO SNOWFLAKE_API_TEST_TABLE 
 VALUES 
     (1, 'test1', '2023-01-01', true),
     (2, 'test2', '2023-01-02', false); 

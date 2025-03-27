@@ -15,7 +15,7 @@ The testing infrastructure is organized into the following components:
 ```
 tests/
 ├── fixtures/             # Test fixtures and data
-├── Integration/          # Integration tests 
+├── Integration/          # Integration tests
 ├── Unit/                 # Unit tests
 │   ├── Services/         # Tests for service classes
 │   └── Traits/           # Tests for traits
@@ -32,7 +32,7 @@ tests/
 
 ### Configuration
 
-For integration tests, you need to set up a Snowflake account and configure the `.env.testing` file with your credentials:
+For integration tests, you need to set up a Snowflake account and configure the `.env.testing.local` file with your credentials:
 
 ```env
 SNOWFLAKE_TEST_URL=https://your-account.snowflakecomputing.com
@@ -46,20 +46,37 @@ SNOWFLAKE_TEST_DATABASE=your-database
 SNOWFLAKE_TEST_SCHEMA=your-schema
 ```
 
+You can use the included example file as a template:
+```bash
+cp .env.testing.local.example .env.testing.local
+# Then edit .env.testing.local with your credentials
+```
+
 ### Running Tests
 
 Use the following Composer scripts to run tests:
 
 ```bash
-# Run all tests
+# Run all tests (unit tests followed by integration tests)
 composer test
 
-# Run only unit tests
+# Run only unit tests (no Snowflake credentials needed)
 composer test:unit
 
-# Run only integration tests
+# Run only integration tests (requires Snowflake credentials)
 composer test:integration
 ```
+
+Both integration test methods will properly load the environment variables from `.env.testing.local`.
+
+## Important Notes
+
+- Tests create a temporary table called `SNOWFLAKE_API_TEST_TABLE` in the configured schema
+- Make sure your credentials have permissions to create/drop tables in the specified schema
+- The tests clean up the temporary table when finished
+- Avoid using production schemas for testing to prevent any accidental data loss
+- Snowflake object names are typically uppercase by default
+- The SnowflakeService `ExecuteQuery` method only supports one SQL statement at a time
 
 ## Writing Tests
 
@@ -77,11 +94,11 @@ class ResultTest extends TestCase
         $result->setFields([
             ['name' => 'bool_col', 'type' => 'BOOLEAN']
         ]);
-        
+
         $result->setData([['true']]);
-        
+
         $converted = $result->toArray();
-        
+
         $this->assertIsBool($converted[0]['bool_col']);
     }
 }
@@ -95,17 +112,29 @@ Integration tests should test actual interactions with the Snowflake API:
 class SnowflakeServiceIntegrationTest extends TestCase
 {
     use TestDataManager;
-    
+
     /** @test */
     public function it_executes_simple_query()
     {
         $result = $this->service->ExecuteQuery('SELECT 1 as TEST');
-        
+
         $this->assertCount(1, $result);
         $this->assertEquals(1, $result->first()['TEST']);
     }
 }
 ```
+
+## Common Issues and Solutions
+
+1. **Multiple SQL statements**: The Snowflake API driver only supports executing one SQL statement at a time. Split multiple statements into separate `ExecuteQuery` calls.
+
+2. **Case sensitivity**: Snowflake object names are typically uppercase by default. Use uppercase names in your queries (e.g., `SELECT * FROM SNOWFLAKE_API_TEST_TABLE`).
+
+3. **Schema permissions**: Ensure your configured user has permissions to create and drop tables in the specified schema.
+
+4. **Authentication errors**: Verify that your private key and passphrase are correctly formatted. Remember that newlines in private keys must be preserved.
+
+5. **Table name conflicts**: If your schema already contains tables that might conflict with test tables, you can modify the `getTestTableName()` method in `TestDataManager` to customize the test table name.
 
 ## Improvements and Optimizations
 
@@ -136,11 +165,11 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
     strategy:
       matrix:
         php: [7.4, 8.0, 8.1]
         laravel: [8.*, 9.*, 10.*]
 ```
 
-Integration tests are only run on the main branch with proper credentials configured as GitHub secrets. 
+Integration tests are only run on the main branch with proper credentials configured as GitHub secrets.

@@ -4,6 +4,7 @@ namespace Tests;
 
 use Orchestra\Testbench\TestCase as BaseTestCase;
 use LaravelSnowflakeApi\SnowflakeApiServiceProvider;
+use Dotenv\Dotenv;
 
 class TestCase extends BaseTestCase
 {
@@ -15,6 +16,21 @@ class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        
+        // Load local test environment if available
+        $localEnvFile = __DIR__ . '/../.env.testing.local';
+        if (file_exists($localEnvFile)) {
+            // Create a Dotenv instance for the local file
+            try {
+                $dotenv = Dotenv::createImmutable(dirname($localEnvFile), basename($localEnvFile));
+                $dotenv->safeLoad();
+            } catch (\Throwable $e) {
+                // Log error but continue with tests
+                if (function_exists('logger')) {
+                    logger()->error('Error loading .env.testing.local: ' . $e->getMessage());
+                }
+            }
+        }
     }
     
     /**

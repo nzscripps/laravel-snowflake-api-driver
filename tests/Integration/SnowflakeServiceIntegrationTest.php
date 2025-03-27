@@ -17,26 +17,30 @@ class SnowflakeServiceIntegrationTest extends TestCase
     {
         parent::setUp();
         
-        // Mock Log facade to reduce noise in tests
+        // Mock Log facade to reduce noise in tests with all required methods
         Log::shouldReceive('debug')->byDefault();
+        Log::shouldReceive('error')->byDefault();
+        Log::shouldReceive('warning')->byDefault();
+        Log::shouldReceive('info')->byDefault();
         
         // Skip integration tests if environment isn't configured
-        if (!env('SNOWFLAKE_TEST_ACCOUNT')) {
+        $account = getenv('SNOWFLAKE_TEST_ACCOUNT');
+        if (empty($account)) {
             $this->markTestSkipped('Snowflake test environment not configured.');
             return;
         }
         
         // Create real service instance with test credentials
         $this->service = new SnowflakeService(
-            env('SNOWFLAKE_TEST_URL', 'https://account.snowflakecomputing.com'),
-            env('SNOWFLAKE_TEST_ACCOUNT'),
-            env('SNOWFLAKE_TEST_USER'),
-            env('SNOWFLAKE_TEST_PUBLIC_KEY'),
-            env('SNOWFLAKE_TEST_PRIVATE_KEY'),
-            env('SNOWFLAKE_TEST_PASSPHRASE'),
-            env('SNOWFLAKE_TEST_WAREHOUSE'),
-            env('SNOWFLAKE_TEST_DATABASE'),
-            env('SNOWFLAKE_TEST_SCHEMA'),
+            getenv('SNOWFLAKE_TEST_URL'),
+            getenv('SNOWFLAKE_TEST_ACCOUNT'),
+            getenv('SNOWFLAKE_TEST_USER'),
+            getenv('SNOWFLAKE_TEST_PUBLIC_KEY'),
+            getenv('SNOWFLAKE_TEST_PRIVATE_KEY'),
+            getenv('SNOWFLAKE_TEST_PASSPHRASE'),
+            getenv('SNOWFLAKE_TEST_WAREHOUSE'),
+            getenv('SNOWFLAKE_TEST_DATABASE'),
+            getenv('SNOWFLAKE_TEST_SCHEMA'),
             30
         );
         
@@ -96,10 +100,17 @@ class SnowflakeServiceIntegrationTest extends TestCase
             $this->markTestSkipped('Service not initialized');
         }
         
-        // Act
-        $result = $this->service->ExecuteQuery('
-            SELECT * FROM test_schema.test_table ORDER BY id
-        ');
+        // Get the test table name
+        $testTable = $this->getTestTableName();
+        
+        // Act - query the unique test table
+        $result = $this->service->ExecuteQuery("
+            SELECT * FROM {$testTable} ORDER BY id
+        ");
+        
+        // Debug output
+        echo "\nTest Query Results from {$testTable}:\n";
+        echo "Total rows: " . count($result) . "\n";
         
         // Assert
         $this->assertCount(2, $result);

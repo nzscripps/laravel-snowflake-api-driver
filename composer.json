@@ -33,9 +33,9 @@
         }
     },
     "scripts": {
-        "test": "phpunit",
+        "test": "phpunit --testsuite Unit && php run-integration-tests.php",
         "test:unit": "phpunit --testsuite Unit",
-        "test:integration": "phpunit --testsuite Integration"
+        "test:integration": "php run-integration-tests.php"
     },
     "license": "MIT",
     "minimum-stability": "dev",

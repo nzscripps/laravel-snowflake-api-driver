@@ -5,6 +5,7 @@ namespace Tests\Unit\Services;
 use Tests\TestCase;
 use LaravelSnowflakeApi\Services\Result;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Collection;
 use Mockery;
 
 class ResultTest extends TestCase
@@ -87,5 +88,48 @@ class ResultTest extends TestCase
         $this->assertEquals(1, $this->result->getPage());
         $this->assertEquals(5, $this->result->getPageTotal());
         $this->assertEquals('2023-01-01', $this->result->getTimestamp());
+    }
+    
+    /** @test */
+    public function it_converts_to_collection()
+    {
+        // Arrange
+        $this->result->setFields([
+            ['name' => 'id', 'type' => 'INTEGER'],
+            ['name' => 'name', 'type' => 'VARCHAR']
+        ]);
+        
+        $this->result->setData([
+            ['1', 'test1'],
+            ['2', 'test2']
+        ]);
+        
+        // Act
+        $collection = $this->result->toCollection();
+        
+        // Assert
+        $this->assertInstanceOf(Collection::class, $collection);
+        $this->assertCount(2, $collection);
+        $this->assertEquals('test1', $collection[0]['name']);
+        $this->assertEquals(2, $collection[1]['id']);
+    }
+    
+    /** @test */
+    public function it_handles_empty_data_set()
+    {
+        // Arrange
+        $this->result->setFields([]);
+        $this->result->setData([]);
+        
+        // Act
+        $array = $this->result->toArray();
+        $collection = $this->result->toCollection();
+        $count = $this->result->count();
+        
+        // Assert
+        $this->assertEmpty($array);
+        $this->assertInstanceOf(Collection::class, $collection);
+        $this->assertEmpty($collection);
+        $this->assertEquals(0, $count);
     }
 } 

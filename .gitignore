@@ -30,6 +30,9 @@ Homestead.json
 auth.json
 .DS_Store
 composer.lock
-.env.testing
 .env.testing.local
 tests/fixtures/test_private_key.pem
+
+# Keep these files in source control
+!.env.testing
+!.env.testing.local.example

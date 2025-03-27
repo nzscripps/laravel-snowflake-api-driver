@@ -102,18 +102,25 @@ For detailed information about optimizations, see [OPTIMIZATIONS.md](OPTIMIZATIO
 
 ## Testing
 
-The package includes a comprehensive test suite:
+The package includes a comprehensive test suite. Before running the integration tests, you'll need to set up your test credentials:
+
+1. Copy `.env.testing` to `.env.testing.local` and add your Snowflake test credentials
+2. Make sure your Snowflake user has permissions to create/drop tables
+
+Then run the tests:
 
 ```bash
-# Run all tests
+# Run all tests (unit tests followed by integration tests)
 composer test
 
-# Run only unit tests
+# Run only unit tests (no Snowflake credentials needed)
 composer test:unit
 
-# Run only integration tests
+# Run only integration tests (requires Snowflake credentials)
 composer test:integration
 ```
+
+All test commands will work properly with the necessary environment configuration.
 
 For detailed information about testing, see [TESTING.md](TESTING.md).
 
