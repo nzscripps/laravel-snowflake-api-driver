@@ -14,7 +14,7 @@ trait DebugLogging
     private $isDebugEnabled = null;
 
     /**
-     * Log debug information if debug logging is enabled
+     * Log debug information if SNOWFLAKE_DEBUG_LOGGING is enabled
      *
      * @param string $message
      * @param array $context
@@ -29,25 +29,23 @@ trait DebugLogging
     
     /**
      * Check if debug logging is enabled
-     *
-     * This method checks configuration in this order:
-     * 1. Local property if already set
-     * 2. Laravel config 'snowflake.debug_logging'
-     * 3. Laravel config 'app.debug'
-     * 4. Environment variable 'SF_DEBUG'
-     * 5. Default to false
+     * 
+     * Checks the SNOWFLAKE_DEBUG_LOGGING environment variable.
+     * Only returns true if the value is explicitly set to 'true'.
      *
      * @return bool
      */
     private function isDebugEnabled(): bool
     {
         if ($this->isDebugEnabled === null) {
-            $this->isDebugEnabled = false;
+            // Check for environment variable and only return true if it's strictly 'true'
+            $envValue = getenv('SNOWFLAKE_DEBUG_LOGGING');
+            $this->isDebugEnabled = ($envValue === 'true');
             
-            if (function_exists('config')) {
-                $this->isDebugEnabled = config('snowflake.debug_logging', false) || config('app.debug', false);
-            } else if (function_exists('env')) {
-                $this->isDebugEnabled = env('SF_DEBUG', false);
+            // Alternate check using env() helper if available
+            if (!$this->isDebugEnabled && function_exists('env')) {
+                $envValue = env('SNOWFLAKE_DEBUG_LOGGING');
+                $this->isDebugEnabled = ($envValue === true || $envValue === 'true');
             }
         }
         

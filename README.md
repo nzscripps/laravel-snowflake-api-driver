@@ -126,21 +126,18 @@ For detailed information about testing, see [TESTING.md](TESTING.md).
 
 ## Debug Logging
 
-You can enable debug logging to troubleshoot issues:
+This package provides debug logging to help troubleshoot issues. Debug logging is disabled by default and must be explicitly enabled:
 
-```php
-// In your .env file
+```
+# In your .env file
 SNOWFLAKE_DEBUG_LOGGING=true
 ```
 
-Or configure it in your application's configuration:
+The debug logging is strictly off unless `SNOWFLAKE_DEBUG_LOGGING` is explicitly set to `true`. 
+This ensures no unnecessary logging in production environments.
 
-```php
-// config/snowflake.php
-return [
-    'debug_logging' => env('SNOWFLAKE_DEBUG_LOGGING', false),
-];
-```
+Note: Debug logging is controlled only by the `SNOWFLAKE_DEBUG_LOGGING` environment variable. 
+It is not affected by Laravel's `APP_DEBUG` setting or any other configuration values.
 
 ## Requirements
 

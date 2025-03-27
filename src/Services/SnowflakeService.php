@@ -56,9 +56,6 @@ class SnowflakeService
      */
     private $tokenExpiry = 0;
 
-    // Add this at class level
-    private $isDebugEnabled = null;
-
     /**
      * Initialize the Snowflake API service
      *
@@ -863,24 +860,6 @@ class SnowflakeService
         ], $additionalData);
         
         Log::error('SnowflakeService: ' . $context, $errorData);
-    }
-
-    // Then modify the Trait's debugLog method to use this check
-    public function debugLog(string $message, array $context = []): void
-    {
-        if ($this->isDebugEnabled()) {
-            Log::debug($message, $context);
-        }
-    }
-
-    // Then add this method to efficiently determine debug state
-    private function isDebugEnabled(): bool
-    {
-        if ($this->isDebugEnabled === null) {
-            $this->isDebugEnabled = config('app.debug', false) || 
-                                  config('snowflake.debug_logging', false);
-        }
-        return $this->isDebugEnabled;
     }
 
     /**

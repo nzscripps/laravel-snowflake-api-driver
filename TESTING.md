@@ -140,10 +140,10 @@ class SnowflakeServiceIntegrationTest extends TestCase
 
 During testing implementation, we made several improvements to the codebase:
 
-1. **Enhanced `DebugLogging` trait**:
-   - Added hierarchical configuration checking
-   - Implemented caching of debug status for performance
-   - Standardized on Log::debug level for consistency
+1. **Simplified `DebugLogging` trait**:
+   - Removed complex conditionals and config checks
+   - Implemented a strict check for SNOWFLAKE_DEBUG_LOGGING=true
+   - Default is now strictly false unless explicitly enabled
 
 2. **Optimized HTTP Client usage**:
    - Improved handling of concurrent requests
