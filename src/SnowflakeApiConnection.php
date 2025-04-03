@@ -395,4 +395,133 @@ class SnowflakeApiConnection extends Connection
             throw $e;
         }
     }
+
+    /**
+     * Get the SnowflakeService instance.
+     *
+     * @return \LaravelSnowflakeApi\Services\SnowflakeService
+     */
+    public function getSnowflakeService()
+    {
+        return $this->snowflakeService;
+    }
+
+    /**
+     * Start a new database transaction.
+     *
+     * @return void
+     * @throws \Exception
+     */
+    public function beginTransaction()
+    {
+        $this->debugLog('SnowflakeApiConnection: Beginning transaction', [
+            'transaction_level' => $this->transactions
+        ]);
+
+        // Increment transaction count
+        $this->transactions++;
+
+        $this->fireConnectionEvent('beganTransaction');
+
+        return true;
+    }
+
+    /**
+     * Commit the active database transaction.
+     *
+     * @return void
+     */
+    public function commit()
+    {
+        $this->debugLog('SnowflakeApiConnection: Committing transaction', [
+            'transaction_level' => $this->transactions
+        ]);
+
+        if ($this->transactions == 1) {
+            $this->fireConnectionEvent('committing');
+        }
+
+        // Decrement transaction count
+        $this->transactions = max(0, $this->transactions - 1);
+        
+        $this->fireConnectionEvent('committed');
+
+        return true;
+    }
+
+    /**
+     * Rollback the active database transaction.
+     *
+     * @param int|null $toLevel
+     * @return void
+     * @throws \Exception
+     */
+    public function rollBack($toLevel = null)
+    {
+        // We allow developers to rollback to a certain transaction level. We will verify
+        // that this given transaction level is valid before attempting to rollback to
+        // that level. If it's not we will just return out and not attempt anything.
+        $toLevel = is_null($toLevel)
+                    ? $this->transactions - 1
+                    : $toLevel;
+
+        if ($toLevel < 0 || $toLevel >= $this->transactions) {
+            return;
+        }
+
+        $this->debugLog('SnowflakeApiConnection: Rolling back transaction', [
+            'from_level' => $this->transactions,
+            'to_level' => $toLevel
+        ]);
+
+        // Set the transaction level back to the given level
+        $this->transactions = $toLevel;
+
+        $this->fireConnectionEvent('rollingBack');
+
+        return true;
+    }
+
+    /**
+     * Perform a rollback within the database - in the case of Snowflake API, we don't have
+     * direct transaction control through the API.
+     *
+     * @param int $toLevel
+     * @return void
+     */
+    protected function performRollBack($toLevel)
+    {
+        $this->debugLog('SnowflakeApiConnection: Performing rollback', [
+            'to_level' => $toLevel
+        ]);
+        
+        // No actual rollback is performed directly since Snowflake API
+        // doesn't provide direct transaction control
+        return true;
+    }
+
+    /**
+     * Get the PDO connection - overriding to prevent transaction-related errors.
+     * The parent Connection class tries to use PDO methods on our $pdo property
+     * for transaction management which won't work with an API-based connection.
+     *
+     * @return mixed
+     */
+    public function getPdo()
+    {
+        // We don't have a real PDO instance, but Laravel's transaction
+        // management relies on calling PDO methods on this object
+        return $this;
+    }
+    
+    /**
+     * For compatibility with PDO methods called by Laravel's transaction management,
+     * implement a mock inTransaction method that uses our own transaction counter
+     *
+     * @return bool
+     */
+    public function inTransaction()
+    {
+        return $this->transactions > 0;
+    }
 }
