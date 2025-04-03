@@ -348,12 +348,51 @@ class SnowflakeApiConnection extends Connection
             'values_count' => count($values)
         ]);
 
-        // Create a new query builder with the columns set
+        if (empty($values)) {
+            $this->debugLog('SnowflakeApiConnection: No values to insert, returning early');
+            return true;
+        }
+
+        // Create a new query builder for the insert
         $query = $this->table($table);
+        
+        // Set the columns property which will be used by the QueryGrammar
         $query->columns = $columns;
         
+        // If the values use numeric keys, normalize them to ensure correct order
+        $firstRow = reset($values);
+        if (is_array($firstRow) && $this->hasNumericKeys($firstRow)) {
+            $this->debugLog('SnowflakeApiConnection: Normalizing values with numeric keys');
+            $values = array_map(function($row) {
+                // Make sure we're dealing with array values to avoid offset issues
+                return is_array($row) ? array_values($row) : [$row];
+            }, $values);
+        }
+        
         // Insert the values
-        return $query->insert($values);
+        try {
+            return $query->insert($values);
+        } catch (Exception $e) {
+            Log::error('SnowflakeApiConnection: Error executing insert with columns', [
+                'table' => $table,
+                'columns' => $columns,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
+    
+    /**
+     * Check if an array has numeric keys
+     *
+     * @param  array  $array
+     * @return bool
+     */
+    protected function hasNumericKeys(array $array)
+    {
+        $keys = array_keys($array);
+        return count(array_filter($keys, 'is_numeric')) === count($keys);
     }
 
     /**

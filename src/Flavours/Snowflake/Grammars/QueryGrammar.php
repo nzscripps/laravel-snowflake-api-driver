@@ -241,57 +241,16 @@ class QueryGrammar extends Grammar
     {
         $this->debugLog('compileInsert', ['values_count' => count($values), 'file' => __FILE__, 'line' => __LINE__]);
         
-        // Extract column names from the first set of values
+        // If no values, use default values syntax
         if (empty($values)) {
             return "insert into {$this->wrapTable($query->from)} default values";
         }
         
-        $firstValue = reset($values);
-        $columnsProvided = false;
-        $allNumeric = false;
+        // Get the first value to analyze structure
+        $firstRow = reset($values);
         
-        // Check if columns are provided as property in the query builder
-        if (isset($query->columns) && !empty($query->columns)) {
-            $columns = $query->columns;
-            $columnsProvided = true;
-            $this->debugLog('Using columns from query builder', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
-        } 
-        // Check if array keys are numeric (positional) or named
-        else if (is_array($firstValue)) {
-            $keys = array_keys($firstValue);
-            $allNumeric = true;
-            
-            foreach ($keys as $key) {
-                if (!is_numeric($key)) {
-                    $allNumeric = false;
-                    break;
-                }
-            }
-            
-            if ($allNumeric) {
-                $this->debugLog('Detected numeric keys in first row', ['keys' => $keys, 'file' => __FILE__, 'line' => __LINE__]);
-                // For numeric keys, we need columns from elsewhere
-                if (isset($query->columns) && !empty($query->columns)) {
-                    $columns = $query->columns;
-                    $this->debugLog('Using columns from query builder for numeric keys', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
-                } else {
-                    // If we don't have column names at all, generate placeholders (col_0, col_1, etc.)
-                    $columns = [];
-                    foreach ($keys as $i) {
-                        $columns[] = "col_" . $i;
-                    }
-                    $this->debugLog('Generated placeholder column names for numeric keys', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
-                }
-            } else {
-                // For named keys, use the keys as column names
-                $columns = $keys;
-                $this->debugLog('Using named keys as column names', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
-            }
-        } else {
-            // If it's not an array, just use a generic column name
-            $columns = ['value'];
-            $this->debugLog('Using generic column name for non-array value', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
-        }
+        // Determine column names based on available information
+        $columns = $this->determineInsertColumns($query, $firstRow);
         
         // Format the columns for SQL
         $formattedColumns = $this->columnize($columns);
@@ -302,31 +261,99 @@ class QueryGrammar extends Grammar
         // Get the values part
         $sqlValues = [];
         foreach ($values as $record) {
-            $formattedValues = [];
-            if (is_array($record)) {
-                if ($columnsProvided || $allNumeric) {
-                    // If columns were provided or keys are numeric, use values in order
-                    foreach (array_values($record) as $value) {
-                        $formattedValues[] = $this->parameter($value);
-                    }
-                } else {
-                    // Otherwise use the associative array mapping
-                    foreach ($columns as $column) {
-                        $value = $record[$column] ?? null;
-                        $formattedValues[] = $this->parameter($value);
-                    }
-                }
-            } else {
-                // If it's a scalar value, just use it directly
-                $formattedValues[] = $this->parameter($record);
-            }
-            
-            $sqlValues[] = '(' . implode(', ', $formattedValues) . ')';
+            $sqlValues[] = $this->formatInsertValues($record, $columns);
         }
         
         $finalSql = $sql . implode(', ', $sqlValues);
         $this->debugLog('Final SQL insert statement', ['sql' => $finalSql, 'file' => __FILE__, 'line' => __LINE__]);
         return $finalSql;
+    }
+    
+    /**
+     * Determine the column names for an insert query
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  array|mixed  $firstRow
+     * @return array
+     */
+    protected function determineInsertColumns(Builder $query, $firstRow)
+    {
+        // Priority 1: Use columns explicitly set on the query builder
+        if (isset($query->columns) && !empty($query->columns)) {
+            $this->debugLog('Using columns from query builder', ['columns' => $query->columns, 'file' => __FILE__, 'line' => __LINE__]);
+            return $query->columns;
+        }
+        
+        // If the first row isn't an array, just use a default column name
+        if (!is_array($firstRow)) {
+            return ['value'];
+        }
+        
+        // Check if array keys are numeric (positional) or named
+        $keys = array_keys($firstRow);
+        $allNumeric = $this->hasOnlyNumericKeys($keys);
+        
+        if ($allNumeric) {
+            // For numeric keys with no columns provided, use generic column names
+            $this->debugLog('Creating placeholder column names for numeric keys', ['file' => __FILE__, 'line' => __LINE__]);
+            return array_map(function($i) {
+                return "col_$i";
+            }, $keys);
+        }
+        
+        // For associative arrays, use the keys as column names
+        $this->debugLog('Using associative keys as column names', ['keys' => $keys, 'file' => __FILE__, 'line' => __LINE__]);
+        return $keys;
+    }
+    
+    /**
+     * Format values for an insert statement
+     *
+     * @param  array|mixed  $record
+     * @param  array  $columns
+     * @return string
+     */
+    protected function formatInsertValues($record, array $columns)
+    {
+        // If not an array, just return a single value
+        if (!is_array($record)) {
+            return '(' . $this->parameter($record) . ')';
+        }
+        
+        $values = [];
+        
+        // Check if we have numeric keys (positional) or associative array
+        $isNumeric = $this->hasOnlyNumericKeys(array_keys($record));
+        
+        if ($isNumeric) {
+            // For numeric keys, use values in order
+            foreach (array_values($record) as $value) {
+                $values[] = $this->parameter($value);
+            }
+        } else {
+            // For associative arrays, map values to columns
+            foreach ($columns as $column) {
+                $values[] = $this->parameter($record[$column] ?? null);
+            }
+        }
+        
+        return '(' . implode(', ', $values) . ')';
+    }
+    
+    /**
+     * Check if an array has only numeric keys
+     *
+     * @param  array  $keys
+     * @return bool
+     */
+    protected function hasOnlyNumericKeys(array $keys)
+    {
+        foreach ($keys as $key) {
+            if (!is_numeric($key)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
