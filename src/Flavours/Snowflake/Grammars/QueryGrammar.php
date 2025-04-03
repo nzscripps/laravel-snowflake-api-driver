@@ -246,26 +246,87 @@ class QueryGrammar extends Grammar
             return "insert into {$this->wrapTable($query->from)} default values";
         }
         
-        $columns = array_keys(reset($values));
+        $firstValue = reset($values);
+        $columnsProvided = false;
+        $allNumeric = false;
+        
+        // Check if columns are provided as property in the query builder
+        if (isset($query->columns) && !empty($query->columns)) {
+            $columns = $query->columns;
+            $columnsProvided = true;
+            $this->debugLog('Using columns from query builder', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
+        } 
+        // Check if array keys are numeric (positional) or named
+        else if (is_array($firstValue)) {
+            $keys = array_keys($firstValue);
+            $allNumeric = true;
+            
+            foreach ($keys as $key) {
+                if (!is_numeric($key)) {
+                    $allNumeric = false;
+                    break;
+                }
+            }
+            
+            if ($allNumeric) {
+                $this->debugLog('Detected numeric keys in first row', ['keys' => $keys, 'file' => __FILE__, 'line' => __LINE__]);
+                // For numeric keys, we need columns from elsewhere
+                if (isset($query->columns) && !empty($query->columns)) {
+                    $columns = $query->columns;
+                    $this->debugLog('Using columns from query builder for numeric keys', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
+                } else {
+                    // If we don't have column names at all, generate placeholders (col_0, col_1, etc.)
+                    $columns = [];
+                    foreach ($keys as $i) {
+                        $columns[] = "col_" . $i;
+                    }
+                    $this->debugLog('Generated placeholder column names for numeric keys', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
+                }
+            } else {
+                // For named keys, use the keys as column names
+                $columns = $keys;
+                $this->debugLog('Using named keys as column names', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
+            }
+        } else {
+            // If it's not an array, just use a generic column name
+            $columns = ['value'];
+            $this->debugLog('Using generic column name for non-array value', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
+        }
         
         // Format the columns for SQL
-        $columns = $this->columnize($columns);
+        $formattedColumns = $this->columnize($columns);
         
         // Begin the SQL statement
-        $sql = "insert into {$this->wrapTable($query->from)} ({$columns}) values ";
+        $sql = "insert into {$this->wrapTable($query->from)} ({$formattedColumns}) values ";
         
         // Get the values part
         $sqlValues = [];
         foreach ($values as $record) {
             $formattedValues = [];
-            foreach ($record as $value) {
-                $formattedValues[] = $this->parameter($value);
+            if (is_array($record)) {
+                if ($columnsProvided || $allNumeric) {
+                    // If columns were provided or keys are numeric, use values in order
+                    foreach (array_values($record) as $value) {
+                        $formattedValues[] = $this->parameter($value);
+                    }
+                } else {
+                    // Otherwise use the associative array mapping
+                    foreach ($columns as $column) {
+                        $value = $record[$column] ?? null;
+                        $formattedValues[] = $this->parameter($value);
+                    }
+                }
+            } else {
+                // If it's a scalar value, just use it directly
+                $formattedValues[] = $this->parameter($record);
             }
             
             $sqlValues[] = '(' . implode(', ', $formattedValues) . ')';
         }
         
-        return $sql . implode(', ', $sqlValues);
+        $finalSql = $sql . implode(', ', $sqlValues);
+        $this->debugLog('Final SQL insert statement', ['sql' => $finalSql, 'file' => __FILE__, 'line' => __LINE__]);
+        return $finalSql;
     }
 
     /**

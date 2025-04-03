@@ -333,6 +333,30 @@ class SnowflakeApiConnection extends Connection
     }
 
     /**
+     * Run an insert statement with explicit column names
+     *
+     * @param  string  $table
+     * @param  array  $columns
+     * @param  array  $values
+     * @return bool
+     */
+    public function insertWithColumns($table, array $columns, array $values)
+    {
+        $this->debugLog('SnowflakeApiConnection: Executing insert with explicit columns', [
+            'table' => $table,
+            'columns' => $columns,
+            'values_count' => count($values)
+        ]);
+
+        // Create a new query builder with the columns set
+        $query = $this->table($table);
+        $query->columns = $columns;
+        
+        // Insert the values
+        return $query->insert($values);
+    }
+
+    /**
      * Run an update statement against the database.
      *
      * @param  string  $query
