@@ -230,6 +230,71 @@ class QueryGrammar extends Grammar
         return DB::connection()->getPdo()->quote($value);
     }
 
+    /**
+     * Compile an insert statement into SQL.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  array  $values
+     * @return string
+     */
+    public function compileInsert(Builder $query, array $values)
+    {
+        $this->debugLog('compileInsert', ['values_count' => count($values), 'file' => __FILE__, 'line' => __LINE__]);
+        
+        // Extract column names from the first set of values
+        if (empty($values)) {
+            return "insert into {$this->wrapTable($query->from)} default values";
+        }
+        
+        $columns = array_keys(reset($values));
+        
+        // Format the columns for SQL
+        $columns = $this->columnize($columns);
+        
+        // Begin the SQL statement
+        $sql = "insert into {$this->wrapTable($query->from)} ({$columns}) values ";
+        
+        // Get the values part
+        $sqlValues = [];
+        foreach ($values as $record) {
+            $formattedValues = [];
+            foreach ($record as $value) {
+                $formattedValues[] = $this->parameter($value);
+            }
+            
+            $sqlValues[] = '(' . implode(', ', $formattedValues) . ')';
+        }
+        
+        return $sql . implode(', ', $sqlValues);
+    }
+
+    /**
+     * Format a value as a parameter for SQL
+     *
+     * @param  mixed  $value
+     * @return string
+     */
+    public function parameter($value)
+    {
+        if (is_null($value)) {
+            return 'null';
+        }
+        
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+        
+        if (is_numeric($value)) {
+            return (string) $value;
+        }
+        
+        if ($value instanceof Expression) {
+            return $this->getValue($value);
+        }
+        
+        return "'" . str_replace("'", "''", $value) . "'";
+    }
+
     protected static function debugLog($message, array $context = [])
     {
         if (env('SF_DEBUG', false)) {
