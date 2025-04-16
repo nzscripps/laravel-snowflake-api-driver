@@ -16,6 +16,13 @@ class QueryGrammar extends Grammar
     use DebugLogging;
 
     /**
+     * The table prefix for the connection.
+     *
+     * @var string
+     */
+    protected $tablePrefix = '';
+
+    /**
      * Create a new grammar instance.
      *
      * @param  \Illuminate\Database\Connection|null  $connection
@@ -26,6 +33,19 @@ class QueryGrammar extends Grammar
         if ($connection !== null) {
             parent::__construct($connection);
         }
+    }
+
+    /**
+     * Set the grammar's table prefix.
+     *
+     * @param  string  $prefix
+     * @return $this
+     */
+    public function setTablePrefix($prefix)
+    {
+        $this->tablePrefix = $prefix;
+        
+        return $this;
     }
 
     /**
