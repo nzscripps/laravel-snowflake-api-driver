@@ -95,7 +95,7 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultQueryGrammar()
     {
         $this->debugLog('SnowflakeApiConnection: Getting default query grammar');
-        return $this->withTablePrefix(new QueryGrammar);
+        return $this->withTablePrefix(new QueryGrammar($this));
     }
 
     /**
@@ -106,7 +106,7 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultSchemaGrammar()
     {
         $this->debugLog('SnowflakeApiConnection: Getting default schema grammar');
-        return $this->withTablePrefix(new SchemaGrammar);
+        return $this->withTablePrefix(new SchemaGrammar($this));
     }
 
     /**
@@ -117,7 +117,7 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultPostProcessor()
     {
         $this->debugLog('SnowflakeApiConnection: Getting default post processor');
-        return new SnowflakeProcessor;
+        return new SnowflakeProcessor($this);
     }
 
     /**

@@ -14,6 +14,17 @@ class SchemaGrammar extends Grammar
     use DebugLogging;
 
     /**
+     * Create a new grammar instance.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return void
+     */
+    public function __construct($connection = null)
+    {
+        parent::__construct($connection);
+    }
+
+    /**
      * The possible column modifiers.
      *
      * @var string[]

@@ -16,6 +16,17 @@ class QueryGrammar extends Grammar
     use DebugLogging;
 
     /**
+     * Create a new grammar instance.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return void
+     */
+    public function __construct($connection = null)
+    {
+        parent::__construct($connection);
+    }
+
+    /**
      * The components that make up a select clause.
      *
      * @var string[]

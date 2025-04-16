@@ -13,6 +13,21 @@ class Processor extends BaseProcessor
 {
     use DebugLogging;
 
+    /**
+     * Create a new processor instance.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return void
+     */
+    public function __construct($connection = null)
+    {
+        // The BaseProcessor doesn't have a constructor that takes a connection yet,
+        // but we're adding this for future compatibility
+        if (method_exists(parent::class, '__construct')) {
+            parent::__construct($connection);
+        }
+    }
+
     public static function preWrapTable($tableName)
     {
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
