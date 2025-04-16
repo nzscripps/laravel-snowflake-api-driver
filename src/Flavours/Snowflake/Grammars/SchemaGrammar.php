@@ -21,6 +21,13 @@ class SchemaGrammar extends Grammar
     protected $tablePrefix = '';
 
     /**
+     * Whether identifiers are case-sensitive.
+     *
+     * @var bool
+     */
+    protected $caseSensitive = false;
+
+    /**
      * Create a new grammar instance.
      *
      * @param  \Illuminate\Database\Connection|null  $connection
@@ -31,6 +38,16 @@ class SchemaGrammar extends Grammar
         if ($connection !== null) {
             parent::__construct($connection);
         }
+        
+        // Determine case sensitivity once during construction
+        // Try config first
+        if (function_exists('config')) {
+            $this->caseSensitive = config('database.connections.snowflake_api.case_sensitive', false);
+        } else {
+            // Fallback to env if config helper isn't available (e.g., early bootstrap)
+            $this->caseSensitive = env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false);
+        }
+        $this->debugLog('SchemaGrammar initialized', ['caseSensitive' => $this->caseSensitive]);
     }
 
     /**
@@ -217,23 +234,20 @@ class SchemaGrammar extends Grammar
     {
         $this->debugLog('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         
-        // Cache the env value to prevent infinite recursion with env() call
-        static $caseSensitive = null;
-        
-        if ($caseSensitive === null) {
-            // Try to get from config first, which avoids env() calls
-            if (function_exists('config')) {
-                $caseSensitive = config('database.connections.snowflake_api.case_sensitive', false);
-            } else {
-                // Fallback to env, but only do this once and cache the result
-                $caseSensitive = env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false);
-            }
-        }
-        
-        if (! $caseSensitive) {
-            $table = Str::upper($table);
+        // Handle Blueprint input
+        if ($table instanceof Blueprint) {
+            $table = $table->getTable();
         }
 
+        // Use the cached property
+        if (! $this->caseSensitive) {
+            // Ensure we only uppercase if it's a string and not already wrapped
+            if (is_string($table) && strpos($table, '\"') === false) { 
+                $table = Str::upper($table);
+            }
+        }
+
+        // Call parent::wrapTable *after* potential uppercasing
         return parent::wrapTable($table, $prefix);
     }
 

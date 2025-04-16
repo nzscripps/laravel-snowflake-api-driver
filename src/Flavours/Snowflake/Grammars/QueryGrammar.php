@@ -23,6 +23,13 @@ class QueryGrammar extends Grammar
     protected $tablePrefix = '';
 
     /**
+     * Whether identifiers are case-sensitive.
+     *
+     * @var bool
+     */
+    protected $caseSensitive = false;
+
+    /**
      * Create a new grammar instance.
      *
      * @param  \Illuminate\Database\Connection|null  $connection
@@ -33,6 +40,16 @@ class QueryGrammar extends Grammar
         if ($connection !== null) {
             parent::__construct($connection);
         }
+
+        // Determine case sensitivity once during construction
+        // Try config first
+        if (function_exists('config')) {
+            $this->caseSensitive = config('database.connections.snowflake_api.case_sensitive', false);
+        } else {
+            // Fallback to env if config helper isn't available (e.g., early bootstrap)
+            $this->caseSensitive = env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false);
+        }
+        $this->debugLog('QueryGrammar initialized', ['caseSensitive' => $this->caseSensitive]);
     }
 
     /**
@@ -118,20 +135,8 @@ class QueryGrammar extends Grammar
             $tableName = $tableName->getTable();
         }
 
-        // Cache the env value to prevent infinite recursion with env() call
-        static $caseSensitive = null;
-        
-        if ($caseSensitive === null) {
-            // Try to get from config first, which avoids env() calls
-            if (function_exists('config')) {
-                $caseSensitive = config('database.connections.snowflake_api.case_sensitive', false);
-            } else {
-                // Fallback to env, but only do this once and cache the result
-                $caseSensitive = env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false);
-            }
-        }
-
-        if (! $caseSensitive) {
+        // Use the cached property instead of repeated config/env calls
+        if (! $this->caseSensitive) {
             $tableName = Str::upper($tableName);
         }
 
