@@ -62,15 +62,17 @@ class QueryGrammar extends Grammar
      * Wrap a table in keyword identifiers.
      *
      * @param \Illuminate\Database\Query\Expression|string $table
+     * @param string|null $prefix
      *
      * @return string
      */
-    public function wrapTable($table)
+    public function wrapTable($table, $prefix = null)
     {
-        $this->debugLog('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('wrapTable', ['table' => $table, 'prefix' => $prefix, 'file' => __FILE__, 'line' => __LINE__]);
         if (method_exists($this, 'isExpression') && !$this->isExpression($table)) {
             $table = $this->preWrapTable($table);
-            return $this->wrap($this->tablePrefix . $table);
+            $tablePrefix = $prefix ?: $this->tablePrefix;
+            return $this->wrap($tablePrefix . $table);
         }
 
         return $this->getValue($table);
