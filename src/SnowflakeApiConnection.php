@@ -95,7 +95,8 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultQueryGrammar()
     {
         $this->debugLog('SnowflakeApiConnection: Getting default query grammar');
-        $grammar = new QueryGrammar($this);
+        // Create grammar without passing the connection to avoid circular references
+        $grammar = new QueryGrammar();
         $grammar->setTablePrefix($this->tablePrefix);
         return $grammar;
     }
@@ -108,7 +109,8 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultSchemaGrammar()
     {
         $this->debugLog('SnowflakeApiConnection: Getting default schema grammar');
-        $grammar = new SchemaGrammar($this);
+        // Create grammar without passing the connection to avoid circular references
+        $grammar = new SchemaGrammar();
         $grammar->setTablePrefix($this->tablePrefix);
         return $grammar;
     }
@@ -121,7 +123,8 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultPostProcessor()
     {
         $this->debugLog('SnowflakeApiConnection: Getting default post processor');
-        return new SnowflakeProcessor($this);
+        // Create processor without passing the connection to avoid circular references
+        return new SnowflakeProcessor();
     }
 
     /**

@@ -16,16 +16,14 @@ class Processor extends BaseProcessor
     /**
      * Create a new processor instance.
      *
-     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \Illuminate\Database\Connection|null  $connection
      * @return void
      */
     public function __construct($connection = null)
     {
-        // The BaseProcessor doesn't have a constructor that takes a connection yet,
-        // but we're adding this for future compatibility
-        if (method_exists(parent::class, '__construct')) {
-            parent::__construct($connection);
-        }
+        // We intentionally don't call parent constructor to avoid
+        // circular references when connection and processor try to 
+        // instantiate each other
     }
 
     public static function preWrapTable($tableName)
