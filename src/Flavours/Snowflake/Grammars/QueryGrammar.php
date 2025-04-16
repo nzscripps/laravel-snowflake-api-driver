@@ -18,12 +18,14 @@ class QueryGrammar extends Grammar
     /**
      * Create a new grammar instance.
      *
-     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \Illuminate\Database\Connection|null  $connection
      * @return void
      */
     public function __construct($connection = null)
     {
-        parent::__construct($connection);
+        if ($connection !== null) {
+            parent::__construct($connection);
+        }
     }
 
     /**
