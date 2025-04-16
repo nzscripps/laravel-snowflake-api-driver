@@ -63,23 +63,41 @@ class SchemaGrammar extends Grammar
     protected $serials = ['bigInteger', 'integer', 'smallInteger', 'tinyInteger'];
 
     /**
-     * Compile the query to determine the list of tables.
+     * Compile the query to determine if the given table exists.
      *
-     * @return string
+     * @param  string|null  $schema
+     * @param  string  $table
+     * @return string|null
      */
-    public function compileTableExists()
+    public function compileTableExists($schema, $table)
     {
         return 'select * from information_schema.tables where table_schema = ? and table_name = ?';
     }
 
     /**
-     * Compile the query to determine the list of columns.
+     * Compile the query to determine the columns.
      *
+     * @param  string|null  $schema
+     * @param  string  $table
      * @return string
      */
-    public function compileColumnListing()
+    public function compileColumns($schema, $table)
     {
         return 'select column_name from information_schema.columns where table_schema = ? and table_name = ? order by ordinal_position';
+    }
+
+    /**
+     * Compile the query to determine the list of columns.
+     *
+     * @param  string|null  $schema
+     * @param  string  $table
+     * @return string
+     * 
+     * @deprecated Use compileColumns instead
+     */
+    public function compileColumnListing($schema, $table)
+    {
+        return $this->compileColumns($schema, $table);
     }
 
     /**
@@ -192,16 +210,17 @@ class SchemaGrammar extends Grammar
      * Wrap a table in keyword identifiers.
      *
      * @param  mixed  $table
+     * @param  string|null  $prefix
      * @return string
      */
-    public function wrapTable($table)
+    public function wrapTable($table, $prefix = null)
     {
         $this->debugLog('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
             $table = Str::upper($table);
         }
 
-        return parent::wrapTable($table);
+        return parent::wrapTable($table, $prefix);
     }
 
     /**
