@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use PDO;
 use Closure;
 use Exception;
+use Illuminate\Contracts\Foundation\Application;
 
 class SnowflakeApiConnection extends Connection
 {
@@ -22,6 +23,20 @@ class SnowflakeApiConnection extends Connection
      * @var SnowflakeService
      */
     protected $snowflakeService;
+
+    /**
+     * Track initialization to prevent circular references
+     * 
+     * @var bool
+     */
+    protected $initializedGrammars = false;
+    
+    /**
+     * The application instance.
+     *
+     * @var \Illuminate\Contracts\Foundation\Application
+     */
+    protected $app;
 
     /**
      * Create a new database connection instance.
@@ -41,7 +56,16 @@ class SnowflakeApiConnection extends Connection
         ]);
 
         try {
-            parent::__construct($pdo, $database, $tablePrefix, $config);
+            // Set these properties manually to prevent parent constructor from
+            // automatically creating grammar objects which can cause circular references
+            $this->pdo = $pdo;
+            $this->database = $database;
+            $this->tablePrefix = $tablePrefix;
+            $this->config = $config;
+            $this->readPdo = $pdo;
+
+            // Manually initialize grammar objects later to prevent circular references
+            $this->initializedGrammars = false;
 
             // Mask sensitive data for logging
             $logConfig = $config;
@@ -593,5 +617,18 @@ class SnowflakeApiConnection extends Connection
     public function inTransaction()
     {
         return $this->transactions > 0;
+    }
+    
+    /**
+     * Set the application instance.
+     *
+     * @param  \Illuminate\Contracts\Foundation\Application  $app
+     * @return $this
+     */
+    public function setApplication($app)
+    {
+        $this->app = $app;
+        
+        return $this;
     }
 }
