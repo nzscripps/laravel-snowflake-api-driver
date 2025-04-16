@@ -86,8 +86,13 @@ class SnowflakeApiConnection extends Connection
             $this->config = $config;
             $this->readPdo = $pdo;
 
+            // Immediately initialize the grammars and processor to ensure they're ready for use
+            $this->queryGrammar = $this->getDefaultQueryGrammar();
+            $this->schemaGrammar = $this->getDefaultSchemaGrammar();
+            $this->postProcessor = $this->getDefaultPostProcessor();
+            
             // Manually initialize grammar objects later to prevent circular references
-            $this->initializedGrammars = false;
+            $this->initializedGrammars = true;
 
             // Mask sensitive data for logging
             $logConfig = $config;
@@ -667,9 +672,19 @@ class SnowflakeApiConnection extends Connection
     {
         // We implement this private method to prevent the parent class
         // from automatically trying to initialize grammar objects
-        $this->queryGrammar = $this->getDefaultQueryGrammar();
-        $this->postProcessor = $this->getDefaultPostProcessor();
-        $this->schemaGrammar = $this->getDefaultSchemaGrammar();
+        
+        // Only initialize if not already initialized
+        if ($this->queryGrammar === null) {
+            $this->queryGrammar = $this->getDefaultQueryGrammar();
+        }
+        
+        if ($this->postProcessor === null) {
+            $this->postProcessor = $this->getDefaultPostProcessor();
+        }
+        
+        if ($this->schemaGrammar === null) {
+            $this->schemaGrammar = $this->getDefaultSchemaGrammar();
+        }
         
         // The parent implementation would try to call useDefaultQueryGrammar(),
         // useDefaultPostProcessor(), and useDefaultSchemaGrammar()
@@ -716,5 +731,55 @@ class SnowflakeApiConnection extends Connection
         $this->postProcessor = $this->getDefaultPostProcessor();
         
         return $this;
+    }
+
+    /**
+     * Create a query builder instance.
+     *
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public function query()
+    {
+        $this->debugLog('SnowflakeApiConnection: Creating new query builder');
+        
+        // Ensure we have a processor before creating the query builder
+        if ($this->postProcessor === null) {
+            $this->postProcessor = $this->getDefaultPostProcessor();
+        }
+        
+        // Ensure we have a query grammar before creating the query builder
+        if ($this->queryGrammar === null) {
+            $this->queryGrammar = $this->getDefaultQueryGrammar();
+        }
+        
+        return new \Illuminate\Database\Query\Builder(
+            $this, $this->queryGrammar, $this->postProcessor
+        );
+    }
+
+    /**
+     * Begin a fluent query against a database table.
+     *
+     * @param  \Closure|\Illuminate\Database\Query\Builder|string  $table
+     * @param  string|null  $as
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public function table($table, $as = null)
+    {
+        $this->debugLog('SnowflakeApiConnection: Creating query for table', [
+            'table' => $table, 
+            'as' => $as
+        ]);
+        
+        // Make sure we have a processor and grammar
+        if ($this->postProcessor === null) {
+            $this->postProcessor = $this->getDefaultPostProcessor();
+        }
+        
+        if ($this->queryGrammar === null) {
+            $this->queryGrammar = $this->getDefaultQueryGrammar();
+        }
+        
+        return $this->query()->from($table, $as);
     }
 }
