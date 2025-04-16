@@ -118,7 +118,20 @@ class QueryGrammar extends Grammar
             $tableName = $tableName->getTable();
         }
 
-        if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
+        // Cache the env value to prevent infinite recursion with env() call
+        static $caseSensitive = null;
+        
+        if ($caseSensitive === null) {
+            // Try to get from config first, which avoids env() calls
+            if (function_exists('config')) {
+                $caseSensitive = config('database.connections.snowflake_api.case_sensitive', false);
+            } else {
+                // Fallback to env, but only do this once and cache the result
+                $caseSensitive = env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false);
+            }
+        }
+
+        if (! $caseSensitive) {
             $tableName = Str::upper($tableName);
         }
 
