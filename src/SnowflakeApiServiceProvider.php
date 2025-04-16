@@ -18,6 +18,11 @@ class SnowflakeApiServiceProvider extends ServiceProvider
      */
     public function register()
     {
+        // Disable Xdebug if it's running to prevent infinite loop detection
+        if (function_exists('xdebug_is_enabled') && xdebug_is_enabled()) {
+            ini_set('xdebug.max_nesting_level', 3000); // Increase the nesting level
+        }
+        
         // Register grammar and processor classes to prevent circular dependencies
         $this->app->bind(QueryGrammar::class, function () {
             return new QueryGrammar();

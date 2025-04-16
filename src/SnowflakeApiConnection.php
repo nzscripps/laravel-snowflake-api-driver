@@ -49,10 +49,32 @@ class SnowflakeApiConnection extends Connection
      */
     public function __construct($pdo, $database = '', $tablePrefix = '', array $config = [])
     {
+        // Track recursion to prevent infinite loops
+        static $recursionCount = 0;
+        $recursionCount++;
+        
+        if ($recursionCount > 10) {
+            // Log and break recursion if it's happening
+            Log::error('SnowflakeApiConnection: Recursion detected in constructor', [
+                'count' => $recursionCount,
+                'backtrace' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 10)
+            ]);
+            
+            // Set minimal required properties and return
+            $this->pdo = $pdo;
+            $this->database = $database;
+            $this->tablePrefix = $tablePrefix;
+            $this->config = $config;
+            $this->readPdo = $pdo;
+            $recursionCount--; // Decrement counter before early return
+            return;
+        }
+        
         $this->debugLog('SnowflakeApiConnection: Initializing with config', [
             'database' => $database,
             'prefix' => $tablePrefix,
             'config_keys' => array_keys($config),
+            'recursion_count' => $recursionCount
         ]);
 
         try {
@@ -628,6 +650,70 @@ class SnowflakeApiConnection extends Connection
     public function setApplication($app)
     {
         $this->app = $app;
+        
+        return $this;
+    }
+
+    /**
+     * Setup the connection properties.
+     *
+     * This method is called by Laravel's Connection class during initialization,
+     * but we need to override it completely to prevent circular references.
+     *
+     * @param object $pdo
+     * @return void
+     */
+    protected function __initializer__()
+    {
+        // We implement this private method to prevent the parent class
+        // from automatically trying to initialize grammar objects
+        $this->queryGrammar = $this->getDefaultQueryGrammar();
+        $this->postProcessor = $this->getDefaultPostProcessor();
+        $this->schemaGrammar = $this->getDefaultSchemaGrammar();
+        
+        // The parent implementation would try to call useDefaultQueryGrammar(),
+        // useDefaultPostProcessor(), and useDefaultSchemaGrammar()
+        // which can lead to circular references
+    }
+    
+    /**
+     * Set the query grammar to the default implementation.
+     *
+     * @return void
+     */
+    public function useDefaultQueryGrammar()
+    {
+        // This is overridden to prevent Laravel from automatically creating 
+        // a new grammar which can trigger circular references
+        $this->queryGrammar = $this->getDefaultQueryGrammar();
+        
+        return $this;
+    }
+    
+    /**
+     * Set the schema grammar to the default implementation.
+     *
+     * @return void
+     */
+    public function useDefaultSchemaGrammar()
+    {
+        // This is overridden to prevent Laravel from automatically creating 
+        // a new grammar which can trigger circular references
+        $this->schemaGrammar = $this->getDefaultSchemaGrammar();
+        
+        return $this;
+    }
+    
+    /**
+     * Set the query post processor to the default implementation.
+     *
+     * @return void
+     */
+    public function useDefaultPostProcessor()
+    {
+        // This is overridden to prevent Laravel from automatically creating 
+        // a new processor which can trigger circular references
+        $this->postProcessor = $this->getDefaultPostProcessor();
         
         return $this;
     }
