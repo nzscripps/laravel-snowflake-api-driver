@@ -201,6 +201,9 @@ class SnowflakeApiConnection extends Connection
             }
 
             try {
+                // Ensure the Snowflake service is available
+                $this->ensureSnowflakeServiceExists();
+                
                 // Execute query using the Snowflake API Service
                 $this->debugLog('SnowflakeApiConnection: Preparing query for execution');
                 $statement = $this->prepareQuery($query, $bindings);
@@ -332,6 +335,9 @@ class SnowflakeApiConnection extends Connection
             }
 
             try {
+                // Ensure the Snowflake service is available
+                $this->ensureSnowflakeServiceExists();
+                
                 $statement = $this->prepareQuery($query, $bindings);
 
                 $this->debugLog('SnowflakeApiConnection: Executing statement via SnowflakeService', [
@@ -781,5 +787,38 @@ class SnowflakeApiConnection extends Connection
         }
         
         return $this->query()->from($table, $as);
+    }
+
+    /**
+     * Initialize the SnowflakeService if it doesn't exist
+     *
+     * @return void
+     * @throws \Exception
+     */
+    protected function ensureSnowflakeServiceExists()
+    {
+        if ($this->snowflakeService === null) {
+            $this->debugLog('SnowflakeApiConnection: SnowflakeService is null, attempting to initialize it');
+            
+            // Attempt to recreate the service from config
+            $this->snowflakeService = new SnowflakeService(
+                $this->config['host'] ?? '',
+                $this->config['account'] ?? '',
+                $this->config['username'] ?? '',
+                $this->config['public_key'] ?? '',
+                $this->config['private_key'] ?? '',
+                $this->config['private_key_passphrase'] ?? '',
+                $this->config['warehouse'] ?? '',
+                $this->config['database'] ?? $this->database,
+                $this->config['schema'] ?? '',
+                $this->config['timeout'] ?? 30
+            );
+            
+            if ($this->snowflakeService === null) {
+                throw new \Exception('Failed to initialize SnowflakeService');
+            }
+            
+            $this->debugLog('SnowflakeApiConnection: Successfully initialized SnowflakeService');
+        }
     }
 }
