@@ -40,13 +40,12 @@ class QueryGrammar extends Grammar
      */
     public function __construct(?Connection $connection = null)
     {
-        // If a connection is provided (normal instantiation), call parent with it; skip otherwise.
+        // Don't call parent constructor with connection to avoid circular references
+        // Just set the connection directly if provided
         if ($connection) {
-            parent::__construct($connection); // Pass the connection to the base Grammar
-            $this->setConnection($connection);
+            $this->connection = $connection;
+            $this->tablePrefix = $connection->getTablePrefix();
         }
-        // If $connection is null, the $connection property remains uninitialized
-        // until setConnection is called (which should happen in tests or Connection class)
     }
 
     /**
@@ -179,7 +178,7 @@ class QueryGrammar extends Grammar
      */
     public function getValue($expression)
     {
-        $this->debugLog('getValue', ['expression' => $expression, 'file' => __FILE__, 'line' => __LINE__]);
+        $this->debugLog('getValue', ['expression_type' => get_class($expression), 'file' => __FILE__, 'line' => __LINE__]);
         $return = $expression->getValue($this);
         $this->debugLog('display Return', ['return' => $return, 'file' => __FILE__, 'line' => __LINE__]);
         return $return;

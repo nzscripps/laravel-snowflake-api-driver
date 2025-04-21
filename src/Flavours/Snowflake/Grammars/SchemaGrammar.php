@@ -40,13 +40,12 @@ class SchemaGrammar extends Grammar
      */
     public function __construct(?Connection $connection = null)
     {
-        // If a connection is provided (normal instantiation), call parent with it; skip otherwise.
+        // Don't call parent constructor with connection to avoid circular references
+        // Just set the connection directly if provided
         if ($connection) {
-            parent::__construct($connection);
-            $this->setConnection($connection);
+            $this->connection = $connection;
+            $this->tablePrefix = $connection->getTablePrefix();
         }
-        // If $connection is null, the $connection property remains uninitialized
-        // until setConnection is called (which should happen in tests or Connection class)
     }
 
     /**
