@@ -101,7 +101,18 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultQueryGrammar(): QueryGrammarContract
     {
         $this->debugLog('SnowflakeApiConnection: Getting default query grammar');
-        $grammar = new QueryGrammar($this);
+        
+        // Get from container if app exists, otherwise create directly
+        if (function_exists('app') && app()->bound(QueryGrammar::class)) {
+            $grammar = app(QueryGrammar::class);
+        } else {
+            $grammar = new QueryGrammar();
+        }
+        
+        // Set the connection and table prefix
+        $grammar->setConnection($this);
+        $grammar->setTablePrefix($this->tablePrefix);
+        
         return $grammar;
     }
 
@@ -113,7 +124,18 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultSchemaGrammar(): SchemaGrammarContract
     {
         $this->debugLog('SnowflakeApiConnection: Getting default schema grammar');
-        $grammar = new SchemaGrammar($this);
+        
+        // Get from container if app exists, otherwise create directly
+        if (function_exists('app') && app()->bound(SchemaGrammar::class)) {
+            $grammar = app(SchemaGrammar::class);
+        } else {
+            $grammar = new SchemaGrammar();
+        }
+        
+        // Set the connection and table prefix
+        $grammar->setConnection($this);
+        $grammar->setTablePrefix($this->tablePrefix);
+        
         return $grammar;
     }
 
