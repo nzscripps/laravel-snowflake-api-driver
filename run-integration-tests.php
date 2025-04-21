@@ -45,6 +45,12 @@ if (file_exists(__DIR__ . '/.env.testing.local')) {
     echo "Please copy .env.testing.local.example to .env.testing.local and fill in your credentials.\n";
 }
 
+// Check if required Snowflake variables are set
+if (getenv('SNOWFLAKE_TEST_ACCOUNT') === false || empty(getenv('SNOWFLAKE_TEST_ACCOUNT'))) {
+    echo "Error: SNOWFLAKE_TEST_ACCOUNT environment variable is not set. Skipping integration tests.\n";
+    exit(0); // Exit gracefully, indicating tests were skipped
+}
+
 // Run the integration tests
 $result = passthru('vendor/bin/phpunit --testsuite Integration');
 exit($result); 

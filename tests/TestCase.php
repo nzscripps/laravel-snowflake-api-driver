@@ -4,9 +4,8 @@ namespace Tests;
 
 use Orchestra\Testbench\TestCase as BaseTestCase;
 use LaravelSnowflakeApi\SnowflakeApiServiceProvider;
-use Dotenv\Dotenv;
 
-class TestCase extends BaseTestCase
+abstract class TestCase extends BaseTestCase
 {
     /**
      * Setup the test environment.
@@ -16,21 +15,8 @@ class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        
-        // Load local test environment if available
-        $localEnvFile = __DIR__ . '/../.env.testing.local';
-        if (file_exists($localEnvFile)) {
-            // Create a Dotenv instance for the local file
-            try {
-                $dotenv = Dotenv::createImmutable(dirname($localEnvFile), basename($localEnvFile));
-                $dotenv->safeLoad();
-            } catch (\Throwable $e) {
-                // Log error but continue with tests
-                if (function_exists('logger')) {
-                    logger()->error('Error loading .env.testing.local: ' . $e->getMessage());
-                }
-            }
-        }
+
+        // Environment variable check moved to Integration test setup.
     }
     
     /**
@@ -41,25 +27,37 @@ class TestCase extends BaseTestCase
      */
     protected function getEnvironmentSetUp($app)
     {
-        // Setup default database to use sqlite memory
-        $app['config']->set('database.default', 'testing');
-        $app['config']->set('database.connections.testing', [
-            'driver'   => 'sqlite',
-            'database' => ':memory:',
-            'prefix'   => '',
+        // Setup default database connection to be snowflake
+        $app['config']->set('database.default', 'snowflake');
+
+        // Setup Snowflake connection details from environment variables
+        $app['config']->set('database.connections.snowflake', [
+            'driver'                 => 'snowflake-api', // Use the custom driver name
+            'host'                   => env('SNOWFLAKE_TEST_URL'), // Use SNOWFLAKE_TEST_URL
+            'account'                => env('SNOWFLAKE_TEST_ACCOUNT'), // Use SNOWFLAKE_TEST_ACCOUNT
+            'username'               => env('SNOWFLAKE_TEST_USER'), // Use SNOWFLAKE_TEST_USER
+            'password'               => env('SNOWFLAKE_PASSWORD'), // Optional, if using key pair (Keep non-TEST version? Check .env)
+            'public_key'             => env('SNOWFLAKE_TEST_PUBLIC_KEY'), // Use SNOWFLAKE_TEST_PUBLIC_KEY
+            'private_key'            => env('SNOWFLAKE_TEST_PRIVATE_KEY'), // Use SNOWFLAKE_TEST_PRIVATE_KEY
+            'private_key_passphrase' => env('SNOWFLAKE_TEST_PASSPHRASE'), // Use SNOWFLAKE_TEST_PASSPHRASE
+            'warehouse'              => env('SNOWFLAKE_TEST_WAREHOUSE'), // Use SNOWFLAKE_TEST_WAREHOUSE
+            'database'               => env('SNOWFLAKE_TEST_DATABASE'), // Use SNOWFLAKE_TEST_DATABASE
+            'schema'                 => env('SNOWFLAKE_TEST_SCHEMA'), // Use SNOWFLAKE_TEST_SCHEMA
+            'timeout'                => env('SNOWFLAKE_TIMEOUT', 30), // Keep non-TEST version? Check .env
+            'prefix'                 => '', // No prefix usually needed
         ]);
-        
-        // Setup Snowflake configuration
-        $app['config']->set('snowflake.debug_logging', false);
+
+        // Set debug logging based on env variable
+        $app['config']->set('snowflake.debug_logging', env('SF_DEBUG', false));
     }
     
     /**
      * Get package providers.
      *
      * @param  \Illuminate\Foundation\Application  $app
-     * @return array
+     * @return array<int, class-string>
      */
-    protected function getPackageProviders($app)
+    protected function getPackageProviders($app): array
     {
         return [
             SnowflakeApiServiceProvider::class,
@@ -74,11 +72,10 @@ class TestCase extends BaseTestCase
      * @param mixed $value The value to set
      * @return void
      */
-    protected function setPrivateProperty($object, $property, $value)
+    protected function setPrivateProperty(object $object, string $property, mixed $value): void
     {
         $reflection = new \ReflectionClass($object);
         $property = $reflection->getProperty($property);
-        $property->setAccessible(true);
         $property->setValue($object, $value);
     }
     
@@ -89,11 +86,10 @@ class TestCase extends BaseTestCase
      * @param string $property The property name
      * @return mixed The property value
      */
-    protected function getPrivateProperty($object, $property)
+    protected function getPrivateProperty(object $object, string $property): mixed
     {
         $reflection = new \ReflectionClass($object);
         $property = $reflection->getProperty($property);
-        $property->setAccessible(true);
         return $property->getValue($object);
     }
 } 

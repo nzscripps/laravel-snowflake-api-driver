@@ -56,36 +56,33 @@ class TransactionTest extends TestCase
                 return $this;
             }
             
-            public function inTransaction() 
+            public function inTransaction(): bool
             {
                 return $this->transactions > 0;
             }
             
-            public function beginTransaction() 
+            public function beginTransaction(): void
             {
                 $this->transactions++;
-                return true;
             }
             
-            public function commit() 
+            public function commit(): void
             {
                 $this->transactions = max(0, $this->transactions - 1);
-                return true;
             }
             
-            public function rollBack($toLevel = null) 
+            public function rollBack($toLevel = null): void
             {
                 $toLevel = is_null($toLevel) ? $this->transactions - 1 : $toLevel;
                 
                 if ($toLevel < 0 || $toLevel >= $this->transactions) {
-                    return true;
+                    return;
                 }
                 
                 $this->transactions = $toLevel;
-                return true;
             }
             
-            public function transactionLevel() 
+            public function transactionLevel(): int
             {
                 return $this->transactions;
             }
