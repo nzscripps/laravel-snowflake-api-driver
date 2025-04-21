@@ -2,6 +2,7 @@
 
 namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 
+use DateTimeInterface;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Expression;
 use Illuminate\Database\Schema\Blueprint;
@@ -9,12 +10,80 @@ use Illuminate\Database\Schema\Grammars\Grammar;
 use Illuminate\Support\Fluent;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 use RuntimeException;
 
 class SchemaGrammar extends Grammar
 {
     use DebugLogging;
+
+    /**
+     * The database connection instance.
+     *
+     * @var \Illuminate\Database\Connection
+     */
+    protected $connection;
+
+    /**
+     * The table prefix for queries.
+     *
+     * @var string
+     */
+    protected $tablePrefix = '';
+
+    /**
+     * Create a new schema grammar instance.
+     *
+     * @param \Illuminate\Database\Connection|null $connection
+     * @return void
+     */
+    public function __construct(?Connection $connection = null)
+    {
+        // If a connection is provided (normal instantiation), call parent with it; skip otherwise.
+        if ($connection) {
+            parent::__construct($connection);
+            $this->setConnection($connection);
+        }
+        // If $connection is null, the $connection property remains uninitialized
+        // until setConnection is called (which should happen in tests or Connection class)
+    }
+
+    /**
+     * Set the connection instance.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return $this
+     */
+    public function setConnection(Connection $connection)
+    {
+        $this->connection = $connection;
+
+        return $this;
+    }
+
+    /**
+     * Get the table prefix.
+     *
+     * @return string
+     */
+    public function getTablePrefix()
+    {
+        return $this->tablePrefix;
+    }
+
+    /**
+     * Set the table prefix in use by the grammar.
+     *
+     * @param  string  $prefix
+     * @return $this
+     */
+    public function setTablePrefix($prefix)
+    {
+        $this->tablePrefix = $prefix;
+
+        return $this;
+    }
 
     /**
      * The possible column modifiers.

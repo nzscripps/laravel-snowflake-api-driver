@@ -13,8 +13,8 @@ use Illuminate\Support\Facades\Log;
 use PDO;
 use Closure;
 use Exception;
-use Illuminate\Database\Grammar as QueryGrammarContract;
-use Illuminate\Database\Schema\Grammar as SchemaGrammarContract;
+use Illuminate\Database\Query\Grammars\Grammar as QueryGrammarContract;
+use Illuminate\Database\Schema\Grammars\Grammar as SchemaGrammarContract;
 use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Database\Events\TransactionCommitted;
 use Illuminate\Database\Events\TransactionRolledBack;
@@ -101,9 +101,8 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultQueryGrammar(): QueryGrammarContract
     {
         $this->debugLog('SnowflakeApiConnection: Getting default query grammar');
-        $grammar = new QueryGrammar;
-        $grammar->setConnection($this);
-        return $this->withTablePrefix($grammar);
+        $grammar = new QueryGrammar($this);
+        return $grammar;
     }
 
     /**
@@ -114,9 +113,8 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultSchemaGrammar(): SchemaGrammarContract
     {
         $this->debugLog('SnowflakeApiConnection: Getting default schema grammar');
-        $grammar = new SchemaGrammar;
-        $grammar->setConnection($this);
-        return $this->withTablePrefix($grammar);
+        $grammar = new SchemaGrammar($this);
+        return $grammar;
     }
 
     /**
@@ -665,5 +663,18 @@ class SnowflakeApiConnection extends Connection
         // Throw exception if attempts exhausted? Or return null/false?
         // Base implementation might throw LogicException here.
          throw new \LogicException('Transaction attempts exhausted.');
+    }
+
+    /**
+     * Set a grammar instance with table prefix.
+     * Exists for backwards compatibility with Laravel < 12.
+     * 
+     * @param \Illuminate\Database\Grammar $grammar
+     * @return \Illuminate\Database\Grammar
+     */
+    public function withTablePrefix($grammar)
+    {
+        $grammar->setTablePrefix($this->tablePrefix);
+        return $grammar;
     }
 }
