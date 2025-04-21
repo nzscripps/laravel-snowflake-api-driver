@@ -10,15 +10,63 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Query\Grammars\Grammar;
 use Illuminate\Database\Schema\ColumnDefinition;
 use LaravelSnowflakeApi\Traits\DebugLogging;
+use Illuminate\Support\Arr;
+use Illuminate\Database\Connection;
 
 class QueryGrammar extends Grammar
 {
     use DebugLogging;
 
     /**
-     * The components that make up a select clause.
+     * The database connection instance.
+     * Add this property if extending Grammar requires it.
      *
-     * @var string[]
+     * @var \Illuminate\Database\Connection
+     */
+    protected $connection;
+
+    /**
+     * The table prefix for queries.
+     *
+     * @var string
+     */
+    protected $tablePrefix = '';
+
+    /**
+     * Create a new query grammar instance.
+     *
+     * @param \Illuminate\Database\Connection|null $connection
+     * @return void
+     */
+    public function __construct(?Connection $connection = null)
+    {
+        // If a connection is provided (normal instantiation), call parent with it; skip otherwise.
+        if ($connection) {
+            parent::__construct($connection); // Pass the connection to the base Grammar
+            $this->setConnection($connection);
+        }
+        // If $connection is null, the $connection property remains uninitialized
+        // until setConnection is called (which should happen in tests or Connection class)
+    }
+
+    /**
+     * Set the connection instance.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return $this
+     */
+    public function setConnection(Connection $connection)
+    {
+        $this->connection = $connection;
+
+        return $this;
+    }
+
+    /**
+     * The components that make up a select clause.
+     * Order is important.
+     *
+     * @var list<string>
      */
     protected $selectComponents = [
         'aggregate',
@@ -31,20 +79,42 @@ class QueryGrammar extends Grammar
         'orders',
         'limit',
         'offset',
-        'unions',
         'lock',
+        // Note: 'unions' are handled separately in compileSelect
+    ];
+
+    /**
+     * All of the available clause operators.
+     * Add Snowflake specific operators if any.
+     *
+     * @var string[]
+     */
+    protected $operators = [
+        '=', '<>', '!=',
+        '<', '<=', '>', '>=',
+        'like', 'not like',
+        'ilike',
+        '&' , '|', '^', // Bitwise operators if supported
+        // Add other Snowflake operators like RLIKE, REGEXP, etc. if needed
     ];
 
     /**
      * Compile a select query into SQL.
      *
-     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param \Illuminate\Database\Query\Builder $query
      * @return string
      */
-    public function compileSelect(Builder $query)
+    public function compileSelect(Builder $query): string
     {
         $this->debugLog('Compile Select', ['file' => __FILE__, 'line' => __LINE__]);
-        return parent::compileSelect($query);
+        $sql = parent::compileSelect($query);
+
+        if ($query->unions) {
+             $sql = $this->wrapUnion($sql) . ' ' . $this->compileUnions($query);
+        }
+
+        $this->debugLog('Compiled Select', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
+        return $sql;
     }
 
     /**
@@ -62,27 +132,37 @@ class QueryGrammar extends Grammar
      * Wrap a table in keyword identifiers.
      *
      * @param \Illuminate\Database\Query\Expression|string $table
-     *
+     * @param string|null $prefix
      * @return string
      */
-    public function wrapTable($table)
+    public function wrapTable($table, $prefix = null): string
     {
         $this->debugLog('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
         if (method_exists($this, 'isExpression') && !$this->isExpression($table)) {
-            $table = $this->preWrapTable($table);
-            return $this->wrap($this->tablePrefix . $table);
+            $tableName = $this->resolveTableName($table);
+            $prefixedTableName = ($prefix ?? $this->tablePrefix) . $tableName;
+            $this->debugLog('wrapTable', ['resolved_table' => $tableName, 'prefixed_table' => $prefixedTableName, 'file' => __FILE__, 'line' => __LINE__]);
+            return $this->wrap($prefixedTableName, true);
         }
 
         return $this->getValue($table);
     }
 
-    protected function preWrapTable($tableName)
+    /**
+     * Resolve the table name considering potential Blueprint instance and case sensitivity.
+     *
+     * @param mixed $table
+     * @return string
+     */
+    protected function resolveTableName($table): string
     {
-        $this->debugLog('preWrapTable', ['tableName' => $tableName, 'file' => __FILE__, 'line' => __LINE__]);
-        if ($tableName instanceof Blueprint) {
-            $tableName = $tableName->getTable();
+        if ($table instanceof Blueprint) {
+            $table = $table->getTable();
         }
 
+        $tableName = (string) $table;
+
+        // Apply case sensitivity setting BEFORE adding prefix
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
             $tableName = Str::upper($tableName);
         }
@@ -167,40 +247,41 @@ class QueryGrammar extends Grammar
     /**
      * Compile the "limit" portions of the query.
      *
-     * @param  \Illuminate\Database\Query\Builder  $query
-     * @param  int  $limit
+     * @param \Illuminate\Database\Query\Builder $query
+     * @param int $limit
      * @return string
      */
-    protected function compileLimit(Builder $query, $limit)
+    protected function compileLimit(Builder $query, $limit): string
     {
         $this->debugLog('compileLimit', ['limit' => $limit, 'file' => __FILE__, 'line' => __LINE__]);
-        return 'limit ' . $limit;
+        return 'limit ' . (int) $limit;
     }
 
     /**
      * Compile the "offset" portions of the query.
      *
-     * @param  \Illuminate\Database\Query\Builder  $query
-     * @param  int  $offset
+     * @param \Illuminate\Database\Query\Builder $query
+     * @param int $offset
      * @return string
      */
-    protected function compileOffset(Builder $query, $offset)
+    protected function compileOffset(Builder $query, $offset): string
     {
         $this->debugLog('compileOffset', ['offset' => $offset, 'file' => __FILE__, 'line' => __LINE__]);
-        return 'offset ' . $offset;
+        return 'offset ' . (int) $offset;
     }
 
     /**
      * Compile the lock into SQL.
      *
-     * @param  \Illuminate\Database\Query\Builder  $query
-     * @param  bool|string  $value
+     * @param \Illuminate\Database\Query\Builder $query
+     * @param bool|string $value
      * @return string
      */
-    protected function compileLock(Builder $query, $value)
+    protected function compileLock(Builder $query, $value): string
     {
-        $this->debugLog('compileLock', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
-        // Snowflake doesn't support table locking
+        $this->debugLog('compileLock (ignored for Snowflake)', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
+        // Snowflake typically doesn't use SELECT ... FOR UPDATE/SHARE.
+        // Locking is usually managed implicitly by transaction isolation levels.
         return '';
     }
 
@@ -218,32 +299,20 @@ class QueryGrammar extends Grammar
     }
 
     /**
-     * Escapes a value for safe SQL embedding.
-     *
-     * @param  string|float|int|bool|null  $value
-     * @param  bool  $binary
-     * @return string
-     */
-    public function escape($value, $binary = false)
-    {
-        $this->debugLog('escape', ['value' => $value, 'binary' => $binary, 'file' => __FILE__, 'line' => __LINE__]);
-        return DB::connection()->getPdo()->quote($value);
-    }
-
-    /**
      * Compile an insert statement into SQL.
      *
-     * @param  \Illuminate\Database\Query\Builder  $query
-     * @param  array  $values
+     * @param \Illuminate\Database\Query\Builder $query
+     * @param array $values
      * @return string
      */
-    public function compileInsert(Builder $query, array $values)
+    public function compileInsert(Builder $query, array $values): string
     {
         $this->debugLog('compileInsert', ['values_count' => count($values), 'file' => __FILE__, 'line' => __LINE__]);
         
-        // If no values, use default values syntax
+        $table = $this->wrapTable($query->from);
+        
         if (empty($values)) {
-            return "insert into {$this->wrapTable($query->from)} default values";
+            return "insert into {$table} default values";
         }
         
         // Get the first value to analyze structure
@@ -256,7 +325,7 @@ class QueryGrammar extends Grammar
         $formattedColumns = $this->columnize($columns);
         
         // Begin the SQL statement
-        $sql = "insert into {$this->wrapTable($query->from)} ({$formattedColumns}) values ";
+        $sql = "insert into {$table} ({$formattedColumns}) values ";
         
         // Get the values part
         $sqlValues = [];
@@ -362,14 +431,14 @@ class QueryGrammar extends Grammar
      * @param  mixed  $value
      * @return string
      */
-    public function parameter($value)
+    public function parameter($value): string
     {
         if (is_null($value)) {
-            return 'null';
+            return 'NULL';
         }
         
         if (is_bool($value)) {
-            return $value ? 'true' : 'false';
+            return $value ? 'TRUE' : 'FALSE';
         }
         
         if (is_numeric($value)) {
@@ -383,7 +452,215 @@ class QueryGrammar extends Grammar
         return "'" . str_replace("'", "''", $value) . "'";
     }
 
-    protected static function debugLog($message, array $context = [])
+    /**
+     * Compile an insert statement using columns and values into SQL.
+     * Added for compatibility / potential use by Connection::insertWithColumns
+     *
+     * @param \Illuminate\Database\Query\Builder $query
+     * @param array $columns
+     * @param array $values Multi-dimensional array of rows
+     * @return string
+     */
+    public function compileInsertWithColumns(Builder $query, array $columns, array $values): string
+    {
+        $this->debugLog('compileInsertWithColumns', [
+            'columns' => $columns,
+            'values_count' => count($values),
+            'file' => __FILE__, 'line' => __LINE__
+        ]);
+
+        $table = $this->wrapTable($query->from);
+
+        if (empty($values)) {
+            return "insert into {$table} default values";
+        }
+
+        // Ensure values is a multi-dimensional array
+        if (! is_array(reset($values))) {
+            $values = [$values];
+        }
+
+        $formattedColumns = $this->columnize($columns);
+
+        $parameters = collect($values)->map(function ($record) use ($columns) {
+            // Ensure record is an array and map values based on $columns order
+            $orderedRecord = [];
+            if (is_array($record)) {
+                foreach ($columns as $column) {
+                     $orderedRecord[] = $record[$column] ?? null;
+                }
+            } else {
+                 // Handle non-array record case if necessary, maybe throw error?
+                 $orderedRecord = array_fill(0, count($columns), null);
+            }
+            return '(' . $this->parameter($orderedRecord) . ')';
+        })->implode(', ');
+
+        $sql = "insert into {$table} ({$formattedColumns}) values {$parameters}";
+        $this->debugLog('Compiled SQL insert statement with columns', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
+        return $sql;
+    }
+
+    /**
+     * Compile an insert ignore statement into SQL.
+     *
+     * @param  \\Illuminate\\Database\\Query\\Builder  $query
+     * @param  array  $values
+     * @return string
+     */
+    public function compileInsertOrIgnore(Builder $query, array $values): string
+    {
+        // Snowflake uses standard INSERT. Duplicate checks would need
+        // to be handled via constraints or pre-checks.
+        $this->debugLog('compileInsertOrIgnore (using standard INSERT)', ['file' => __FILE__, 'line' => __LINE__]);
+        return $this->compileInsert($query, $values);
+    }
+
+    /**
+     * Compile an "upsert" statement into SQL.
+     *
+     * @param  \\Illuminate\\Database\\Query\\Builder  $query
+     * @param  array  $values
+     * @param  array  $uniqueBy
+     * @param  array  $update
+     * @return string
+     */
+    public function compileUpsert(Builder $query, array $values, array $uniqueBy, array $update): string
+    {
+        // Snowflake uses MERGE statement for upserts
+        $this->debugLog('compileUpsert (using MERGE)', ['uniqueBy' => $uniqueBy, 'file' => __FILE__, 'line' => __LINE__]);
+
+        $table = $this->wrapTable($query->from);
+
+        if (empty($values)) {
+            return ''; // Cannot merge empty values
+        }
+
+        // Assume structure of $values allows getting columns from the first row
+        $firstRow = Arr::isAssoc(reset($values)) ? reset($values) : $values[0]; // Handle both assoc and numeric arrays
+        $columns = $this->columnize(array_keys($firstRow));
+
+        $parameters = collect($values)->map(function ($record) {
+            return '(' . $this->parameter($record) . ')';
+        })->implode(', ');
+
+        // Create a temporary alias for the source data
+        $sourceAlias = 'laravel_upsert_source';
+        // Define the source columns matching the structure of $values
+        $sourceColumns = $this->columnize(array_map(function ($col) use ($sourceAlias) {
+            return "{$sourceAlias}.{$col}";
+        }, array_keys($firstRow)));
+
+        // Build the ON condition for the MERGE
+        $onCondition = collect($uniqueBy)->map(function ($key) use ($table, $sourceAlias) {
+            $wrappedKey = $this->wrap($key);
+            return "{$table}.{$wrappedKey} = {$sourceAlias}.{$wrappedKey}";
+        })->implode(' AND ');
+
+        // Build the UPDATE part
+        $updateAssignments = collect($update)->map(function ($value, $key) use ($table, $sourceAlias) {
+            $wrappedKey = $this->wrap($key);
+            // If value is not an Expression, use the source value
+            $updateValue = $this->isExpression($value) ? $this->getValue($value) : "{$sourceAlias}.{$wrappedKey}";
+            return "{$table}.{$wrappedKey} = {$updateValue}";
+        })->implode(', ');
+
+        // Build the INSERT part
+        $insertColumns = $this->columnize(array_keys($firstRow));
+        $insertValues = $this->columnize(array_map(function ($key) use ($sourceAlias) {
+            return "{$sourceAlias}.{$this->wrap($key)}";
+        }, array_keys($firstRow)));
+
+        $sql = "merge into {$table} using (select {$columns} from values {$parameters} as {$sourceAlias} ({$columns})) as {$sourceAlias} on ({$onCondition})";
+        $sql .= " when matched then update set {$updateAssignments}";
+        $sql .= " when not matched then insert ({$insertColumns}) values ({$insertValues})";
+
+        $this->debugLog('Compiled MERGE statement', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
+        return $sql;
+    }
+
+    /**
+     * Compile an update statement into SQL.
+     *
+     * @param  \\Illuminate\\Database\\Query\\Builder  $query
+     * @param  array  $values
+     * @return string
+     */
+    public function compileUpdate(Builder $query, array $values): string
+    {
+        // Use base compileUpdate but ensure WHERE clause is generated correctly
+        return parent::compileUpdate($query, $values);
+    }
+
+    /**
+     * Compile a delete statement into SQL.
+     *
+     * @param  \\Illuminate\\Database\\Query\\Builder  $query
+     * @return string
+     */
+    public function compileDelete(Builder $query): string
+    {
+        // Use base compileDelete but ensure WHERE clause is generated correctly
+        return parent::compileDelete($query);
+    }
+
+    /**
+     * Compile a truncate table statement into SQL.
+     *
+     * @param  \\Illuminate\\Database\\Query\\Builder  $query
+     * @return array
+     */
+    public function compileTruncate(Builder $query): array
+    {
+        $table = $this->wrapTable($query->from);
+        return ["truncate table {$table}" => []];
+    }
+
+    /**
+     * Get the format for database stored dates.
+     *
+     * @return string
+     */
+    public function getDateFormat(): string
+    {
+        // Snowflake default is 'YYYY-MM-DD HH24:MI:SS.FF3' but TIMESTAMP_NTZ is common
+        return 'Y-m-d H:i:s.u'; // Use microseconds for broader compatibility
+    }
+
+    /**
+     * Prepare the bindings for an update statement.
+     *
+     * @param array $bindings
+     * @param array $values
+     * @return array
+     */
+    public function prepareBindingsForUpdate(array $bindings, array $values): array
+    {
+        // Snowflake doesn't typically use bindings in the same way due to the API approach.
+        // This method might not be directly used if the Connection class builds the full SQL.
+        // However, if bindings were to be used, they would be merged here.
+        $this->debugLog('prepareBindingsForUpdate (potentially unused)', ['bindings' => $bindings, 'values' => $values]);
+        return parent::prepareBindingsForUpdate($bindings, $values);
+    }
+
+    /**
+     * Quote the given string literal.
+     * This is primarily for string values.
+     *
+     * @param string|array $value
+     * @return string
+     */
+    public function quoteString($value): string
+    {
+        if (is_array($value)) {
+            return implode(', ', array_map([$this, __FUNCTION__], $value));
+        }
+
+        // Basic single quote escaping for SQL strings
+        return "'" . str_replace("'", "''", (string) $value) . "'";
+    }
+
+    protected static function debugLog($message, array $context = []): void
     {
         if (env('SF_DEBUG', false)) {
             Log::info($message, $context);
