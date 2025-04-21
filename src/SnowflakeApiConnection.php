@@ -13,6 +13,12 @@ use Illuminate\Support\Facades\Log;
 use PDO;
 use Closure;
 use Exception;
+use Illuminate\Database\Grammar as QueryGrammarContract;
+use Illuminate\Database\Schema\Grammar as SchemaGrammarContract;
+use Illuminate\Database\Events\TransactionBeginning;
+use Illuminate\Database\Events\TransactionCommitted;
+use Illuminate\Database\Events\TransactionRolledBack;
+use Throwable;
 
 class SnowflakeApiConnection extends Connection
 {
@@ -92,10 +98,12 @@ class SnowflakeApiConnection extends Connection
      *
      * @return \Illuminate\Database\Grammar
      */
-    protected function getDefaultQueryGrammar()
+    protected function getDefaultQueryGrammar(): QueryGrammarContract
     {
         $this->debugLog('SnowflakeApiConnection: Getting default query grammar');
-        return $this->withTablePrefix(new QueryGrammar);
+        $grammar = new QueryGrammar;
+        $grammar->setConnection($this);
+        return $this->withTablePrefix($grammar);
     }
 
     /**
@@ -103,10 +111,12 @@ class SnowflakeApiConnection extends Connection
      *
      * @return \Illuminate\Database\Grammar
      */
-    protected function getDefaultSchemaGrammar()
+    protected function getDefaultSchemaGrammar(): SchemaGrammarContract
     {
         $this->debugLog('SnowflakeApiConnection: Getting default schema grammar');
-        return $this->withTablePrefix(new SchemaGrammar);
+        $grammar = new SchemaGrammar;
+        $grammar->setConnection($this);
+        return $this->withTablePrefix($grammar);
     }
 
     /**
@@ -114,7 +124,7 @@ class SnowflakeApiConnection extends Connection
      *
      * @return \Illuminate\Database\Query\Processors\Processor
      */
-    protected function getDefaultPostProcessor()
+    protected function getDefaultPostProcessor(): Processor
     {
         $this->debugLog('SnowflakeApiConnection: Getting default post processor');
         return new SnowflakeProcessor;
@@ -128,7 +138,7 @@ class SnowflakeApiConnection extends Connection
      * @param bool $useReadPdo
      * @return array
      */
-    public function select($query, $bindings = [], $useReadPdo = true)
+    public function select($query, $bindings = [], $useReadPdo = true): array
     {
         $this->debugLog('SnowflakeApiConnection: Executing select query', [
             'query' => $query,
@@ -239,18 +249,21 @@ class SnowflakeApiConnection extends Connection
         return implode('', $queryParts);
     }
 
-    private function formatBinding($value)
+    private function formatBinding($value): string
     {
         if (is_string($value)) {
             return "'" . str_replace("'", "''", $value) . "'";
         }
         if (is_bool($value)) {
-            return $value ? 'true' : 'false';
+            return $value ? '1' : '0';
+        }
+        if (is_int($value) || is_float($value)) {
+            return (string) $value;
         }
         if (is_null($value)) {
-            return 'null';
+            return 'NULL';
         }
-        return $value;
+        return (string) $value;
     }
 
     /**
@@ -260,7 +273,7 @@ class SnowflakeApiConnection extends Connection
      * @param array $bindings
      * @return int
      */
-    public function statement($query, $bindings = [])
+    public function statement($query, $bindings = []): bool
     {
         $this->debugLog('SnowflakeApiConnection: Executing statement', [
             'query' => $query,
@@ -270,7 +283,7 @@ class SnowflakeApiConnection extends Connection
         return $this->run($query, $bindings, function ($query, $bindings) {
             if ($this->pretending()) {
                 $this->debugLog('SnowflakeApiConnection: Pretending to run statement');
-                return 0;
+                return true;
             }
 
             try {
@@ -288,7 +301,7 @@ class SnowflakeApiConnection extends Connection
                     'affected_rows' => $count
                 ]);
 
-                return $count;
+                return $count >= 0;
             } catch (Exception $e) {
                 Log::error('SnowflakeApiConnection: Error executing statement', [
                     'query' => $statement ?? $query,
@@ -307,7 +320,7 @@ class SnowflakeApiConnection extends Connection
      * @param  array  $bindings
      * @return bool
      */
-    public function insert($query, $bindings = [])
+    public function insert($query, $bindings = []): bool
     {
         $this->debugLog('SnowflakeApiConnection: Executing insert statement', [
             'query' => $query,
@@ -340,7 +353,7 @@ class SnowflakeApiConnection extends Connection
      * @param  array  $values
      * @return bool
      */
-    public function insertWithColumns($table, array $columns, array $values)
+    public function insertWithColumns($table, array $columns, array $values): bool
     {
         $this->debugLog('SnowflakeApiConnection: Executing insert with explicit columns', [
             'table' => $table,
@@ -402,7 +415,7 @@ class SnowflakeApiConnection extends Connection
      * @param  array  $bindings
      * @return int
      */
-    public function update($query, $bindings = [])
+    public function update($query, $bindings = []): int
     {
         $this->debugLog('SnowflakeApiConnection: Executing update statement', [
             'query' => $query,
@@ -434,7 +447,7 @@ class SnowflakeApiConnection extends Connection
      * @param  array  $bindings
      * @return int
      */
-    public function delete($query, $bindings = [])
+    public function delete($query, $bindings = []): int
     {
         $this->debugLog('SnowflakeApiConnection: Executing delete statement', [
             'query' => $query,
@@ -464,7 +477,7 @@ class SnowflakeApiConnection extends Connection
      *
      * @return \LaravelSnowflakeApi\Services\SnowflakeService
      */
-    public function getSnowflakeService()
+    public function getSnowflakeService(): SnowflakeService
     {
         return $this->snowflakeService;
     }
@@ -475,10 +488,11 @@ class SnowflakeApiConnection extends Connection
      * @return void
      * @throws \Exception
      */
-    public function beginTransaction()
+    public function beginTransaction(): void
     {
         $this->debugLog('SnowflakeApiConnection: Beginning transaction', [
-            'transaction_level' => $this->transactions
+            'current_level' => $this->transactions,
+            'new_level' => $this->transactions + 1
         ]);
 
         // Increment transaction count
@@ -486,7 +500,12 @@ class SnowflakeApiConnection extends Connection
 
         $this->fireConnectionEvent('beganTransaction');
 
-        return true;
+        $this->debugLog('SnowflakeApiConnection: Transaction level incremented', [
+            'transaction_level' => $this->transactions
+        ]);
+
+        // Note: No actual "BEGIN TRANSACTION" sent via API here.
+        // Transaction handling is simulated locally.
     }
 
     /**
@@ -494,7 +513,7 @@ class SnowflakeApiConnection extends Connection
      *
      * @return void
      */
-    public function commit()
+    public function commit(): void
     {
         $this->debugLog('SnowflakeApiConnection: Committing transaction', [
             'transaction_level' => $this->transactions
@@ -509,7 +528,11 @@ class SnowflakeApiConnection extends Connection
         
         $this->fireConnectionEvent('committed');
 
-        return true;
+        $this->debugLog('SnowflakeApiConnection: Transaction committed, level decremented', [
+            'transaction_level' => $this->transactions
+        ]);
+
+        // Note: No actual "COMMIT" sent via API here.
     }
 
     /**
@@ -519,7 +542,7 @@ class SnowflakeApiConnection extends Connection
      * @return void
      * @throws \Exception
      */
-    public function rollBack($toLevel = null)
+    public function rollBack($toLevel = null): void
     {
         // We allow developers to rollback to a certain transaction level. We will verify
         // that this given transaction level is valid before attempting to rollback to
@@ -542,7 +565,13 @@ class SnowflakeApiConnection extends Connection
 
         $this->fireConnectionEvent('rollingBack');
 
-        return true;
+        $this->debugLog('SnowflakeApiConnection: Rollback processed, transaction level set', [
+            'transaction_level' => $this->transactions
+        ]);
+
+        // Note: No actual "ROLLBACK" sent via API here.
+        // This simulation assumes any API calls made within the "transaction"
+        // are either atomic or the application handles compensation logic.
     }
 
     /**
@@ -552,15 +581,14 @@ class SnowflakeApiConnection extends Connection
      * @param int $toLevel
      * @return void
      */
-    protected function performRollBack($toLevel)
+    protected function performRollBack($toLevel): void
     {
-        $this->debugLog('SnowflakeApiConnection: Performing rollback', [
+        $this->debugLog('SnowflakeApiConnection: Performing simulated rollback (no API call)', [
             'to_level' => $toLevel
         ]);
         
         // No actual rollback is performed directly since Snowflake API
         // doesn't provide direct transaction control
-        return true;
     }
 
     /**
@@ -583,8 +611,59 @@ class SnowflakeApiConnection extends Connection
      *
      * @return bool
      */
-    public function inTransaction()
+    public function inTransaction(): bool
     {
         return $this->transactions > 0;
+    }
+
+    /**
+     * Get the current transaction level.
+     * Added for compatibility with newer Laravel versions.
+     *
+     * @return int
+     */
+    public function transactionLevel(): int
+    {
+        return $this->transactions;
+    }
+
+    /**
+     * Execute a Closure within a transaction.
+     * Override to ensure our simulated transaction logic is used.
+     *
+     * @param  \Closure  $callback
+     * @param  int  $attempts
+     * @return mixed
+     *
+     * @throws \Throwable
+     */
+    public function transaction(Closure $callback, $attempts = 1): mixed
+    {
+        for ($a = 1; $a <= $attempts; $a++) {
+            $this->beginTransaction();
+
+            // We'll catch all exceptions triggering a rollback callback. Then we will
+            // analyze the types of exceptions thrown and decide whether or not to
+            // try the transaction again. We'll retry the transaction on deadlocks.
+            try {
+                $result = $callback($this);
+
+                $this->commit();
+            }
+
+            // If we catch an exception we will roll back the transaction Closure's actions
+            // and throw the exception again. We will catch any exception here so we
+            // can ensure that the transaction is rolled back before any exception.
+            catch (Throwable $e) {
+                $this->rollBack();
+
+                throw $e;
+            }
+
+            return $result;
+        }
+        // Throw exception if attempts exhausted? Or return null/false?
+        // Base implementation might throw LogicException here.
+         throw new \LogicException('Transaction attempts exhausted.');
     }
 }
