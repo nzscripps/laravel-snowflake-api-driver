@@ -484,23 +484,25 @@ class SchemaGrammar extends Grammar
      * @param string|null $prefix
      * @return string
      */
-    public function wrapTable($table, $prefix = null): string // Corrected signature
+    public function wrapTable($table, $prefix = null): string
     {
-        // Use the QueryGrammar's wrapping logic if available and consistent
-        // Otherwise, implement specific logic for schema grammar if needed.
-        if ($this->getQueryGrammar() instanceof \LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar) {
-            return $this->getQueryGrammar()->wrapTable($table, $prefix);
-        } else {
-            // Fallback or simplified logic if query grammar isn't the expected type
-            if ($table instanceof Blueprint) {
-                 $table = $table->getTable();
-            }
-            $tableName = (string) $table;
-            if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
-                $tableName = Str::upper($tableName);
-            }
-            return parent::wrapTable($tableName, $prefix);
+        // Fallback direct implementation without calling QueryGrammar to avoid circular references
+        if ($table instanceof Blueprint) {
+            $table = $table->getTable();
         }
+        
+        $tableName = (string) $table;
+        
+        // Apply case sensitivity setting
+        if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
+            $tableName = Str::upper($tableName);
+        }
+        
+        // Apply prefix if provided or use the current tablePrefix
+        $prefixedTableName = ($prefix ?? $this->tablePrefix) . $tableName;
+        
+        // Wrap the table name
+        return '"' . str_replace('"', '""', $prefixedTableName) . '"';
     }
 
     /**
@@ -959,16 +961,6 @@ class SchemaGrammar extends Grammar
     }
 
     // Add other geometry types (linestring, polygon, etc.) if needed...
-
-    /**
-     * Get the query grammar instance.
-     *
-     * @return \Illuminate\Database\Query\Grammars\Grammar
-     */
-    protected function getQueryGrammar(): \Illuminate\Database\Query\Grammars\Grammar
-    {
-        return $this->connection->getQueryGrammar();
-    }
 
     // Add quoteString method if not inherited or needs override
     public function quoteString($value): string
