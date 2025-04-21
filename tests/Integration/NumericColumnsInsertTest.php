@@ -17,6 +17,7 @@ class NumericColumnsInsertTest extends TestCase
 {
     protected $connection;
     protected $mockSnowflakeService;
+    protected $grammar;
 
     protected function setUp(): void
     {
@@ -28,22 +29,30 @@ class NumericColumnsInsertTest extends TestCase
         // Create a mock connection
         $this->connection = Mockery::mock(SnowflakeApiConnection::class)->makePartial()
             ->shouldAllowMockingProtectedMethods();
+
+        // Create the grammar directly
+        $this->grammar = new QueryGrammar();
         
         // Always use our custom mock for the snowflake service
         $this->connection->shouldReceive('getSnowflakeService')->andReturn($this->mockSnowflakeService);
         
-        // Set up the query grammar
-        $grammar = new QueryGrammar();
-        $this->connection->shouldReceive('getQueryGrammar')->andReturn($grammar);
-        
         // Set up the post processor
-        $processor = new Processor();
+        $processor = new Processor(); // Assuming base Processor is fine
         $this->connection->shouldReceive('getPostProcessor')->andReturn($processor);
         
-        // These methods are called during query execution
+        // Explicitly mock getQueryGrammar to return our instance
+        $this->connection->shouldReceive('getQueryGrammar')->andReturn($this->grammar);
+        
+        // These methods are called during query execution or by grammar
         $this->connection->shouldReceive('getTablePrefix')->andReturn('');
         $this->connection->shouldReceive('pretending')->andReturn(false);
         $this->connection->shouldReceive('getName')->andReturn('snowflake_api');
+        $this->connection->shouldReceive('parameter')->andReturnUsing(function($value) { // Mock parameter method used by grammar
+             if (is_null($value)) return 'NULL';
+             if (is_bool($value)) return $value ? 'TRUE' : 'FALSE';
+             if (is_numeric($value)) return (string) $value;
+             return "'" . str_replace("'", "''", $value) . "'";
+        });
     }
     
     /**
@@ -71,11 +80,8 @@ class NumericColumnsInsertTest extends TestCase
             }
         };
         
-        // Create a grammar directly
-        $grammar = new QueryGrammar();
-        
         // Compile the insert statement
-        $sql = $grammar->compileInsert($query, $data);
+        $sql = $this->grammar->compileInsert($query, $data);
         
         // Verify the SQL has the correct format with column names
         $this->assertStringContainsString('insert into TEST_TABLE (id, name, value) values', $sql);
@@ -105,11 +111,8 @@ class NumericColumnsInsertTest extends TestCase
             }
         };
         
-        // Create a grammar directly
-        $grammar = new QueryGrammar();
-        
         // Compile the insert statement
-        $sql = $grammar->compileInsert($query, $data);
+        $sql = $this->grammar->compileInsert($query, $data);
         
         // Verify the SQL has generated column names
         $this->assertStringContainsString('insert into TEST_TABLE (col_0, col_1, col_2) values', $sql);

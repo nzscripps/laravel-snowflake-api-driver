@@ -21,22 +21,22 @@ class ColumnMappingInsertTest extends TestCase
         parent::setUp();
         
         // Create the grammar directly for testing
-        $this->grammar = new QueryGrammar();
+        $this->grammar = new QueryGrammar(); 
         
-        // Create a mock connection for testing
+        // Create a mock connection
         $this->connection = Mockery::mock(SnowflakeApiConnection::class)
-            ->makePartial()
+            ->makePartial() // Restore makePartial
             ->shouldAllowMockingProtectedMethods();
             
-        // Set up needed methods
-        $this->connection->shouldReceive('getQueryGrammar')
-            ->andReturn($this->grammar);
+        // Set up mocks for methods needed
+        $this->connection->shouldReceive('getTablePrefix')->andReturn('');
+        $this->connection->shouldReceive('getName')->andReturn('snowflake_api');
         
-        $this->connection->shouldReceive('getTablePrefix')
-            ->andReturn('');
-            
-        $this->connection->shouldReceive('getName')
-            ->andReturn('snowflake_api');
+        // Mock getQueryGrammar to return the manually created instance
+        $this->connection->shouldReceive('getQueryGrammar')->andReturn($this->grammar);
+
+        // No need to manually set connection here if getQueryGrammar is mocked
+        // $this->grammar->setConnection($this->connection);
     }
     
     /**

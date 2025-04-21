@@ -199,7 +199,7 @@ class TransactionUsageTest extends TestCase
             }
             
             // Update transaction methods to handle mock data
-            public function beginTransaction()
+            public function beginTransaction(): void
             {
                 $this->transactions++;
                 // Clear any leftover transaction data
@@ -207,13 +207,12 @@ class TransactionUsageTest extends TestCase
                     $this->transactionData = [];
                 }
                 $this->logs[] = "BEGIN TRANSACTION";
-                return true;
             }
             
-            public function commit()
+            public function commit(): void
             {
                 if ($this->transactions <= 0) {
-                    return true;
+                    return;
                 }
                 
                 // On commit, move transaction data to permanent storage
@@ -230,15 +229,14 @@ class TransactionUsageTest extends TestCase
                 
                 $this->transactions = max(0, $this->transactions - 1);
                 $this->logs[] = "COMMIT";
-                return true;
             }
             
-            public function rollBack($toLevel = null)
+            public function rollBack($toLevel = null): void
             {
                 $toLevel = is_null($toLevel) ? $this->transactions - 1 : $toLevel;
                 
                 if ($toLevel < 0 || $toLevel >= $this->transactions) {
-                    return true;
+                    return;
                 }
                 
                 // On rollback, discard transaction data
@@ -246,16 +244,15 @@ class TransactionUsageTest extends TestCase
                 
                 $this->transactions = $toLevel;
                 $this->logs[] = "ROLLBACK";
-                return true;
             }
             
-            public function inTransaction()
+            public function inTransaction(): bool
             {
                 return $this->transactions > 0;
             }
             
             // Override database methods to work with mock data
-            public function select($query, $bindings = [], $useReadPdo = true)
+            public function select($query, $bindings = [], $useReadPdo = true): array
             {
                 $this->logs[] = "SELECT: $query";
                 
@@ -268,13 +265,13 @@ class TransactionUsageTest extends TestCase
                 return [];
             }
             
-            public function insert($query, $bindings = [])
+            public function insert($query, $bindings = []): bool
             {
                 $this->logs[] = "INSERT: $query";
                 return true;
             }
             
-            public function statement($query, $bindings = [])
+            public function statement($query, $bindings = []): bool
             {
                 $this->logs[] = "STATEMENT: $query";
                 return true;
@@ -385,64 +382,61 @@ class TransactionUsageTest extends TestCase
             }
             
             // Mock transaction methods
-            public function beginTransaction()
+            public function beginTransaction(): void
             {
                 $this->transactions++;
                 $this->logs[] = "BEGIN TRANSACTION";
-                return true;
             }
             
-            public function commit()
+            public function commit(): void
             {
                 $this->transactions = max(0, $this->transactions - 1);
                 $this->logs[] = "COMMIT";
-                return true;
             }
             
-            public function rollBack($toLevel = null)
+            public function rollBack($toLevel = null): void
             {
                 $toLevel = is_null($toLevel) ? $this->transactions - 1 : $toLevel;
                 
                 if ($toLevel < 0 || $toLevel >= $this->transactions) {
-                    return true;
+                    return;
                 }
                 
                 $this->transactions = $toLevel;
                 $this->logs[] = "ROLLBACK";
-                return true;
             }
             
-            public function inTransaction()
+            public function inTransaction(): bool
             {
                 return $this->transactions > 0;
             }
             
             // Override various methods that would try to access the database
-            public function select($query, $bindings = [], $useReadPdo = true)
+            public function select($query, $bindings = [], $useReadPdo = true): array
             {
                 $this->logs[] = "SELECT: $query";
                 return [];
             }
             
-            public function insert($query, $bindings = [])
+            public function insert($query, $bindings = []): bool
             {
                 $this->logs[] = "INSERT: $query";
                 return true;
             }
             
-            public function update($query, $bindings = [])
+            public function update($query, $bindings = []): int
             {
                 $this->logs[] = "UPDATE: $query";
                 return 1;
             }
             
-            public function delete($query, $bindings = [])
+            public function delete($query, $bindings = []): int
             {
                 $this->logs[] = "DELETE: $query";
                 return 1;
             }
             
-            public function statement($query, $bindings = [])
+            public function statement($query, $bindings = []): bool
             {
                 $this->logs[] = "STATEMENT: $query";
                 return true;
