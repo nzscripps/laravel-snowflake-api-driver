@@ -124,7 +124,7 @@ class BasicApplicationUsageTest extends TestCase
         $connection->statement("CREATE TABLE {$tableName} (id NUMBER, name VARCHAR)");
         
         // Use transaction - this is a common pattern in Laravel apps
-        $connection->transaction(function($conn) use ($tableName) {
+        $connection->transaction(function($conn) use ($tableName): void {
             $conn->table($tableName)->insert(['id' => 1, 'name' => 'Transaction Test']);
             $conn->table($tableName)->where('id', 1)->update(['name' => 'Updated in Transaction']);
         });

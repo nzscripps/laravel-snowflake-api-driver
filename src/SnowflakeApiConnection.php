@@ -545,7 +545,7 @@ class SnowflakeApiConnection extends Connection
 
         // Decrement transaction count
         $this->transactions = max(0, $this->transactions - 1);
-        
+
         $this->fireConnectionEvent('committed');
 
         $this->debugLog('SnowflakeApiConnection: Transaction committed, level decremented', [
@@ -606,7 +606,7 @@ class SnowflakeApiConnection extends Connection
         $this->debugLog('SnowflakeApiConnection: Performing simulated rollback (no API call)', [
             'to_level' => $toLevel
         ]);
-        
+
         // No actual rollback is performed directly since Snowflake API
         // doesn't provide direct transaction control
     }

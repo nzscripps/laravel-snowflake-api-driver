@@ -74,7 +74,7 @@ function exampleUsage()
         ->update(['status' => 'shipped']);
         
     // Use transactions
-    $snowflake->transaction(function ($connection) {
+    $snowflake->transaction(function ($connection): void {
         $connection->table('inventory')->where('product_id', 5)->decrement('stock', 1);
         $connection->table('sales')->insert(['product_id' => 5, 'quantity' => 1]);
     });
