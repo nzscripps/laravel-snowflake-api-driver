@@ -39,3 +39,4 @@ tests/fixtures/test_private_key.pem
 # SpecStory explanation file
 .specstory/.what-is-this.md
 /.specstory
+/CLAUDE.md
