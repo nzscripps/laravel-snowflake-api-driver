@@ -68,7 +68,7 @@ trait TestDataManager
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             // Continue test execution even if setup fails
         }
     }
@@ -97,7 +97,7 @@ trait TestDataManager
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             // Continue test execution even if cleanup fails
         }
     }

@@ -1,0 +1,21 @@
+diff --git a/src/Flavours/Snowflake/Grammars/QueryGrammar.php b/src/Flavours/Snowflake/Grammars/QueryGrammar.php
+index xxxxxxx..yyyyyyy 100644
+--- a/src/Flavours/Snowflake/Grammars/QueryGrammar.php
++++ b/src/Flavours/Snowflake/Grammars/QueryGrammar.php
+@@ -226,7 +226,15 @@ class QueryGrammar extends Grammar
+         }
+ 
+         if ('*' !== $column) {
+-            return str_replace('"', '', $column);
++            // If we have a column name with nested quotes like "'column_name'"
++            // preserve the inner quotes while removing the outer ones
++            if (substr($column, 0, 1) === '"' && substr($column, -1) === '"') {
++                return substr($column, 1, -1);
++            }
++            
++            // For normal column names, just strip all quotes
++            return str_replace('"', '', $column);
+         }
+ 
+         return $column;
+``` 

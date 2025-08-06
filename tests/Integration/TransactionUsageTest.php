@@ -87,7 +87,7 @@ class TransactionUsageTest extends TestCase
         ];
         
         // Use Laravel's DB transaction
-        DB::connection('test_snowflake')->transaction(function($db) use ($data, $connection) {
+        DB::connection('test_snowflake')->transaction(function($db) use ($data, $connection): void {
             $chunks = array_chunk($data, 2);
             foreach ($chunks as $index => $chunk) {
                 // Simulate the insert operation
@@ -103,7 +103,7 @@ class TransactionUsageTest extends TestCase
         
         // Test transaction with exception
         try {
-            DB::connection('test_snowflake')->transaction(function($db) use ($connection) {
+            DB::connection('test_snowflake')->transaction(function($db) use ($connection): void {
                 $connection->addTestLog("Insert failed data");
                 throw new Exception('Test exception in transaction');
             });
@@ -302,7 +302,7 @@ class TransactionUsageTest extends TestCase
         ];
         
         // Use DB transaction to insert data
-        DB::connection('test_snowflake')->transaction(function($db) use ($testRows, $connection) {
+        DB::connection('test_snowflake')->transaction(function($db) use ($testRows, $connection): void {
             // Add data to our mock storage
             $connection->addMockData('test_table', $testRows);
             
@@ -321,7 +321,7 @@ class TransactionUsageTest extends TestCase
         
         // Test transaction rollback - data should not be persisted
         try {
-            DB::connection('test_snowflake')->transaction(function($db) use ($connection) {
+            DB::connection('test_snowflake')->transaction(function($db) use ($connection): void {
                 // Add data that should be rolled back
                 $connection->addMockData('test_table', [
                     ['id' => 4, 'name' => 'Should not exist']
