@@ -659,6 +659,22 @@ class QueryGrammar extends Grammar
         return "'" . str_replace("'", "''", (string) $value) . "'";
     }
 
+    /**
+     * Process columns in SQL for handling special characters and quotes.
+     * This method is used primarily for testing PIVOT column handling.
+     *
+     * @param string $sql
+     * @return string
+     */
+    public function processColumns($sql): string
+    {
+        // For now, just return the SQL as-is since Snowflake handles
+        // quoted identifiers natively. This method exists primarily for
+        // testing compatibility with PIVOT operations that generate
+        // column names with special characters.
+        return $sql;
+    }
+
     protected static function debugLog($message, array $context = []): void
     {
         if (env('SF_DEBUG', false)) {

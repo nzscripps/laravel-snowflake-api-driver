@@ -193,7 +193,13 @@ class SnowflakeApiConnection extends Connection
                     'array_count' => count($array)
                 ]);
 
-                return $array;
+                // Convert arrays to objects for Laravel compatibility
+                // Laravel's query builder expects objects (stdClass) not arrays
+                $objects = array_map(function ($row) {
+                    return (object) $row;
+                }, $array);
+
+                return $objects;
             } catch (Exception $e) {
                 Log::error('SnowflakeApiConnection: Error executing select query', [
                     'query' => $statement ?? $query,

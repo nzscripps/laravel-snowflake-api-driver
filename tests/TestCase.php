@@ -32,7 +32,7 @@ abstract class TestCase extends BaseTestCase
 
         // Setup Snowflake connection details from environment variables
         $app['config']->set('database.connections.snowflake', [
-            'driver'                 => 'snowflake-api', // Use the custom driver name
+            'driver'                 => 'snowflake_api', // Use the custom driver name
             'host'                   => env('SNOWFLAKE_TEST_URL'), // Use SNOWFLAKE_TEST_URL
             'account'                => env('SNOWFLAKE_TEST_ACCOUNT'), // Use SNOWFLAKE_TEST_ACCOUNT
             'username'               => env('SNOWFLAKE_TEST_USER'), // Use SNOWFLAKE_TEST_USER
