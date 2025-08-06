@@ -193,13 +193,22 @@ class SnowflakeApiConnection extends Connection
                     'array_count' => count($array)
                 ]);
 
-                // Convert arrays to objects for Laravel compatibility
-                // Laravel's query builder expects objects (stdClass) not arrays
-                $objects = array_map(function ($row) {
-                    return (object) $row;
-                }, $array);
+                // Check fetch mode from config
+                // Default to FETCH_OBJ for Laravel compatibility, but allow FETCH_ASSOC for legacy code
+                $fetchMode = $this->config['fetch'] ?? $this->config['fetch_mode'] ?? PDO::FETCH_OBJ;
+                
+                if ($fetchMode === PDO::FETCH_ASSOC || $fetchMode === 'FETCH_ASSOC' || $fetchMode === 'array') {
+                    // Return as associative arrays
+                    return $array;
+                } else {
+                    // Convert arrays to objects for Laravel compatibility
+                    // Laravel's query builder expects objects (stdClass) not arrays
+                    $objects = array_map(function ($row) {
+                        return (object) $row;
+                    }, $array);
 
-                return $objects;
+                    return $objects;
+                }
             } catch (Exception $e) {
                 Log::error('SnowflakeApiConnection: Error executing select query', [
                     'query' => $statement ?? $query,
