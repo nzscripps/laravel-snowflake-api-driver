@@ -2,6 +2,7 @@
 
 namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 
+use DateTimeInterface;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Expression;
 use Illuminate\Database\Schema\Blueprint;
@@ -9,12 +10,79 @@ use Illuminate\Database\Schema\Grammars\Grammar;
 use Illuminate\Support\Fluent;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 use RuntimeException;
 
 class SchemaGrammar extends Grammar
 {
     use DebugLogging;
+
+    /**
+     * The database connection instance.
+     *
+     * @var \Illuminate\Database\Connection
+     */
+    protected $connection;
+
+    /**
+     * The table prefix for queries.
+     *
+     * @var string
+     */
+    protected $tablePrefix = '';
+
+    /**
+     * Create a new schema grammar instance.
+     *
+     * @param \Illuminate\Database\Connection|null $connection
+     * @return void
+     */
+    public function __construct(?Connection $connection = null)
+    {
+        // Don't call parent constructor with connection to avoid circular references
+        // Just set the connection directly if provided
+        if ($connection) {
+            $this->connection = $connection;
+            $this->tablePrefix = $connection->getTablePrefix();
+        }
+    }
+
+    /**
+     * Set the connection instance.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return $this
+     */
+    public function setConnection(Connection $connection)
+    {
+        $this->connection = $connection;
+
+        return $this;
+    }
+
+    /**
+     * Get the table prefix.
+     *
+     * @return string
+     */
+    public function getTablePrefix()
+    {
+        return $this->tablePrefix;
+    }
+
+    /**
+     * Set the table prefix in use by the grammar.
+     *
+     * @param  string  $prefix
+     * @return $this
+     */
+    public function setTablePrefix($prefix)
+    {
+        $this->tablePrefix = $prefix;
+
+        return $this;
+    }
 
     /**
      * The possible column modifiers.
@@ -415,23 +483,25 @@ class SchemaGrammar extends Grammar
      * @param string|null $prefix
      * @return string
      */
-    public function wrapTable($table, $prefix = null): string // Corrected signature
+    public function wrapTable($table, $prefix = null): string
     {
-        // Use the QueryGrammar's wrapping logic if available and consistent
-        // Otherwise, implement specific logic for schema grammar if needed.
-        if ($this->getQueryGrammar() instanceof \LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar) {
-            return $this->getQueryGrammar()->wrapTable($table, $prefix);
-        } else {
-            // Fallback or simplified logic if query grammar isn't the expected type
-            if ($table instanceof Blueprint) {
-                 $table = $table->getTable();
-            }
-            $tableName = (string) $table;
-            if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
-                $tableName = Str::upper($tableName);
-            }
-            return parent::wrapTable($tableName, $prefix);
+        // Fallback direct implementation without calling QueryGrammar to avoid circular references
+        if ($table instanceof Blueprint) {
+            $table = $table->getTable();
         }
+        
+        $tableName = (string) $table;
+        
+        // Apply case sensitivity setting
+        if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
+            $tableName = Str::upper($tableName);
+        }
+        
+        // Apply prefix if provided or use the current tablePrefix
+        $prefixedTableName = ($prefix ?? $this->tablePrefix) . $tableName;
+        
+        // Wrap the table name
+        return '"' . str_replace('"', '""', $prefixedTableName) . '"';
     }
 
     /**
@@ -890,16 +960,6 @@ class SchemaGrammar extends Grammar
     }
 
     // Add other geometry types (linestring, polygon, etc.) if needed...
-
-    /**
-     * Get the query grammar instance.
-     *
-     * @return \Illuminate\Database\Query\Grammars\Grammar
-     */
-    protected function getQueryGrammar(): \Illuminate\Database\Query\Grammars\Grammar
-    {
-        return $this->connection->getQueryGrammar();
-    }
 
     // Add quoteString method if not inherited or needs override
     public function quoteString($value): string

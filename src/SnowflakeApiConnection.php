@@ -13,8 +13,8 @@ use Illuminate\Support\Facades\Log;
 use PDO;
 use Closure;
 use Exception;
-use Illuminate\Database\Grammar as QueryGrammarContract;
-use Illuminate\Database\Schema\Grammar as SchemaGrammarContract;
+use Illuminate\Database\Query\Grammars\Grammar as QueryGrammarContract;
+use Illuminate\Database\Schema\Grammars\Grammar as SchemaGrammarContract;
 use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Database\Events\TransactionCommitted;
 use Illuminate\Database\Events\TransactionRolledBack;
@@ -101,9 +101,19 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultQueryGrammar(): QueryGrammarContract
     {
         $this->debugLog('SnowflakeApiConnection: Getting default query grammar');
-        $grammar = new QueryGrammar;
+        
+        // Get from container if app exists, otherwise create directly
+        if (function_exists('app') && app()->bound(QueryGrammar::class)) {
+            $grammar = app(QueryGrammar::class);
+        } else {
+            $grammar = new QueryGrammar();
+        }
+        
+        // Set the connection and table prefix
         $grammar->setConnection($this);
-        return $this->withTablePrefix($grammar);
+        $grammar->setTablePrefix($this->tablePrefix);
+        
+        return $grammar;
     }
 
     /**
@@ -114,9 +124,19 @@ class SnowflakeApiConnection extends Connection
     protected function getDefaultSchemaGrammar(): SchemaGrammarContract
     {
         $this->debugLog('SnowflakeApiConnection: Getting default schema grammar');
-        $grammar = new SchemaGrammar;
+        
+        // Get from container if app exists, otherwise create directly
+        if (function_exists('app') && app()->bound(SchemaGrammar::class)) {
+            $grammar = app(SchemaGrammar::class);
+        } else {
+            $grammar = new SchemaGrammar();
+        }
+        
+        // Set the connection and table prefix
         $grammar->setConnection($this);
-        return $this->withTablePrefix($grammar);
+        $grammar->setTablePrefix($this->tablePrefix);
+        
+        return $grammar;
     }
 
     /**
@@ -525,7 +545,7 @@ class SnowflakeApiConnection extends Connection
 
         // Decrement transaction count
         $this->transactions = max(0, $this->transactions - 1);
-        
+
         $this->fireConnectionEvent('committed');
 
         $this->debugLog('SnowflakeApiConnection: Transaction committed, level decremented', [
@@ -586,7 +606,7 @@ class SnowflakeApiConnection extends Connection
         $this->debugLog('SnowflakeApiConnection: Performing simulated rollback (no API call)', [
             'to_level' => $toLevel
         ]);
-        
+
         // No actual rollback is performed directly since Snowflake API
         // doesn't provide direct transaction control
     }
@@ -665,5 +685,47 @@ class SnowflakeApiConnection extends Connection
         // Throw exception if attempts exhausted? Or return null/false?
         // Base implementation might throw LogicException here.
          throw new \LogicException('Transaction attempts exhausted.');
+    }
+
+    /**
+     * Set a grammar instance with table prefix.
+     * Exists for backwards compatibility with Laravel < 12.
+     * 
+     * @param \Illuminate\Database\Grammar $grammar
+     * @return \Illuminate\Database\Grammar
+     */
+    public function withTablePrefix($grammar)
+    {
+        $grammar->setTablePrefix($this->tablePrefix);
+        return $grammar;
+    }
+
+    /**
+     * Quote a string value for safe SQL embedding.
+     * Implements PDO::quote() functionality for the API-based connection.
+     *
+     * @param  string  $value
+     * @param  int  $type
+     * @return string
+     */
+    public function quote($value, $type = PDO::PARAM_STR)
+    {
+        if (is_null($value)) {
+            return 'NULL';
+        }
+
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (string) $value;
+        }
+
+        // Escape single quotes by doubling them (Snowflake standard)
+        $escaped = str_replace("'", "''", (string) $value);
+        
+        // Wrap in single quotes
+        return "'" . $escaped . "'";
     }
 }
