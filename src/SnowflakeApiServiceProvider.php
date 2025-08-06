@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ServiceProvider;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\SchemaGrammar;
+use LaravelSnowflakeApi\SnowflakeApiConnection;
 
 class SnowflakeApiServiceProvider extends ServiceProvider
 {
@@ -26,7 +27,7 @@ class SnowflakeApiServiceProvider extends ServiceProvider
             return new SchemaGrammar();
         });
         
-        // Register connection resolver
+        // Also register with underscore for backwards compatibility
         Connection::resolverFor('snowflake_api', function ($connection, $database, $prefix, $config) {
             return new SnowflakeApiConnection($connection, $database, $prefix, $config);
         });

@@ -52,5 +52,5 @@ if (getenv('SNOWFLAKE_TEST_ACCOUNT') === false || empty(getenv('SNOWFLAKE_TEST_A
 }
 
 // Run the integration tests
-$result = passthru('vendor/bin/phpunit --testsuite Integration');
-exit($result); 
+passthru('vendor/bin/phpunit --testsuite Integration', $result);
+exit($result ?? 0); 

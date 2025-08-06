@@ -193,7 +193,13 @@ class SnowflakeApiConnection extends Connection
                     'array_count' => count($array)
                 ]);
 
-                return $array;
+                // Convert arrays to objects for Laravel compatibility
+                // Laravel's query builder expects objects (stdClass) not arrays
+                $objects = array_map(function ($row) {
+                    return (object) $row;
+                }, $array);
+
+                return $objects;
             } catch (Exception $e) {
                 Log::error('SnowflakeApiConnection: Error executing select query', [
                     'query' => $statement ?? $query,
@@ -698,5 +704,34 @@ class SnowflakeApiConnection extends Connection
     {
         $grammar->setTablePrefix($this->tablePrefix);
         return $grammar;
+    }
+
+    /**
+     * Quote a string value for safe SQL embedding.
+     * Implements PDO::quote() functionality for the API-based connection.
+     *
+     * @param  string  $value
+     * @param  int  $type
+     * @return string
+     */
+    public function quote($value, $type = PDO::PARAM_STR)
+    {
+        if (is_null($value)) {
+            return 'NULL';
+        }
+
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (string) $value;
+        }
+
+        // Escape single quotes by doubling them (Snowflake standard)
+        $escaped = str_replace("'", "''", (string) $value);
+        
+        // Wrap in single quotes
+        return "'" . $escaped . "'";
     }
 }
