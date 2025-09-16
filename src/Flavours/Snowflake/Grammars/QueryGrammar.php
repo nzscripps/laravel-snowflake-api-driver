@@ -387,24 +387,25 @@ class QueryGrammar extends Grammar
         if (!is_array($record)) {
             return '(' . $this->parameter($record) . ')';
         }
-        
+
         $values = [];
-        
+
         // Check if we have numeric keys (positional) or associative array
         $isNumeric = $this->hasOnlyNumericKeys(array_keys($record));
-        
+
         if ($isNumeric) {
-            // For numeric keys, use values in order
-            foreach (array_values($record) as $value) {
-                $values[] = $this->parameter($value);
+            // For numeric keys, use values in order with column context
+            foreach (array_values($record) as $index => $value) {
+                $columnName = $columns[$index] ?? null;
+                $values[] = $this->parameter($value, ['column' => $columnName]);
             }
         } else {
             // For associative arrays, map values to columns
             foreach ($columns as $column) {
-                $values[] = $this->parameter($record[$column] ?? null);
+                $values[] = $this->parameter($record[$column] ?? null, ['column' => $column]);
             }
         }
-        
+
         return '(' . implode(', ', $values) . ')';
     }
     
@@ -428,27 +429,44 @@ class QueryGrammar extends Grammar
      * Format a value as a parameter for SQL
      *
      * @param  mixed  $value
+     * @param  array  $context  Optional context with column information
      * @return string
      */
-    public function parameter($value): string
+    public function parameter($value, array $context = []): string
     {
         if (is_null($value)) {
             return 'NULL';
         }
-        
+
         if (is_bool($value)) {
             return $value ? 'TRUE' : 'FALSE';
         }
-        
-        if (is_numeric($value)) {
+
+        // Check if we're dealing with a column that should always be treated as string
+        $columnName = $context['column'] ?? null;
+        $forceStringColumns = explode(',', env('SNOWFLAKE_FORCE_STRING_COLUMNS', 'order_number'));
+
+        // If this column should be forced to string, always quote it
+        if ($columnName && in_array(strtolower($columnName), array_map('strtolower', array_map('trim', $forceStringColumns)))) {
+            return "'" . str_replace("'", "''", (string) $value) . "'";
+        }
+
+        // Check if we should treat numeric strings as strings
+        // When SNOWFLAKE_QUOTE_NUMERIC_STRINGS is true, numeric strings will be quoted
+        if (is_string($value) && is_numeric($value) && env('SNOWFLAKE_QUOTE_NUMERIC_STRINGS', false)) {
+            return "'" . str_replace("'", "''", $value) . "'";
+        }
+
+        if (is_numeric($value) && !is_string($value)) {
+            // Only unquote actual numeric types (int, float), not numeric strings
             return (string) $value;
         }
-        
+
         if ($value instanceof Expression) {
             return $this->getValue($value);
         }
-        
-        return "'" . str_replace("'", "''", $value) . "'";
+
+        return "'" . str_replace("'", "''", (string) $value) . "'";
     }
 
     /**
@@ -482,17 +500,8 @@ class QueryGrammar extends Grammar
         $formattedColumns = $this->columnize($columns);
 
         $parameters = collect($values)->map(function ($record) use ($columns) {
-            // Ensure record is an array and map values based on $columns order
-            $orderedRecord = [];
-            if (is_array($record)) {
-                foreach ($columns as $column) {
-                     $orderedRecord[] = $record[$column] ?? null;
-                }
-            } else {
-                 // Handle non-array record case if necessary, maybe throw error?
-                 $orderedRecord = array_fill(0, count($columns), null);
-            }
-            return '(' . $this->parameter($orderedRecord) . ')';
+            // Format each row using the formatInsertValues method which handles column context
+            return $this->formatInsertValues($record, $columns);
         })->implode(', ');
 
         $sql = "insert into {$table} ({$formattedColumns}) values {$parameters}";
