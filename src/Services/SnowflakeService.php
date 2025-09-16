@@ -4,28 +4,27 @@ declare(strict_types=1);
 
 namespace LaravelSnowflakeApi\Services;
 
-use LaravelSnowflakeApi\Services\Result;
-use LaravelSnowflakeApi\Services\SnowflakeConfig;
-use LaravelSnowflakeApi\Exceptions\SnowflakeApiException;
 use Exception;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Jose\Component\Core\AlgorithmManager;
 use Jose\Component\KeyManagement\JWKFactory;
 use Jose\Component\Signature\Algorithm\RS256;
 use Jose\Component\Signature\JWSBuilder;
 use Jose\Component\Signature\Serializer\CompactSerializer;
-use Symfony\Component\HttpClient\HttpClient;
-use Symfony\Component\HttpClient\Exception\JsonException;
-use Symfony\Contracts\HttpClient\ResponseInterface;
+use LaravelSnowflakeApi\Exceptions\SnowflakeApiException;
 use LaravelSnowflakeApi\Traits\DebugLogging;
+use Symfony\Component\HttpClient\Exception\JsonException;
+use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 
 class SnowflakeService
 {
     use DebugLogging;
 
     private const CODE_SUCCESS = '090001';
+
     private const CODE_ASYNC = '333334';
 
     /**
@@ -37,21 +36,21 @@ class SnowflakeService
 
     /**
      * HTTP Client instance for reuse
-     * 
+     *
      * @var \Symfony\Contracts\HttpClient\HttpClientInterface
      */
     private $httpClient;
 
     /**
      * Cached access token to avoid regeneration on every request
-     * 
+     *
      * @var string|null
      */
     private $cachedToken = null;
 
     /**
      * Expiry timestamp for the cached token
-     * 
+     *
      * @var int
      */
     private $tokenExpiry = 0;
@@ -59,16 +58,16 @@ class SnowflakeService
     /**
      * Initialize the Snowflake API service
      *
-     * @param string $baseUrl The base URL for the Snowflake API
-     * @param string $account The Snowflake account identifier
-     * @param string $user The Snowflake username
-     * @param string $publicKey The public key fingerprint
-     * @param string $privateKey The private key content (PEM format)
-     * @param string $privateKeyPassphrase The passphrase for the private key
-     * @param string $warehouse The Snowflake warehouse to use
-     * @param string $database The Snowflake database to use
-     * @param string $schema The Snowflake schema to use
-     * @param int $timeout Timeout in seconds for query execution
+     * @param  string  $baseUrl  The base URL for the Snowflake API
+     * @param  string  $account  The Snowflake account identifier
+     * @param  string  $user  The Snowflake username
+     * @param  string  $publicKey  The public key fingerprint
+     * @param  string  $privateKey  The private key content (PEM format)
+     * @param  string  $privateKeyPassphrase  The passphrase for the private key
+     * @param  string  $warehouse  The Snowflake warehouse to use
+     * @param  string  $database  The Snowflake database to use
+     * @param  string  $schema  The Snowflake schema to use
+     * @param  int  $timeout  Timeout in seconds for query execution
      */
     public function __construct(
         string $baseUrl,
@@ -83,27 +82,27 @@ class SnowflakeService
         int $timeout
     ) {
         $this->config = new SnowflakeConfig(
-            $baseUrl, 
-            $account, 
-            $user, 
-            $publicKey, 
-            $privateKey, 
-            $privateKeyPassphrase, 
-            $warehouse, 
-            $database, 
-            $schema, 
+            $baseUrl,
+            $account,
+            $user,
+            $publicKey,
+            $privateKey,
+            $privateKeyPassphrase,
+            $warehouse,
+            $database,
+            $schema,
             $timeout
         );
-        
+
         // Configure HTTP client with supported options only
         $this->httpClient = HttpClient::create([
             'timeout' => $timeout,
             'http_version' => '2.0',
             'max_redirects' => 5,
             'verify_peer' => true,
-            'verify_host' => true
+            'verify_host' => true,
         ]);
-        
+
         $this->debugLog('SnowflakeService: Initialized', [
             'baseUrl' => $this->config->getBaseUrl(),
             'account' => $this->config->getAccount(),
@@ -112,9 +111,9 @@ class SnowflakeService
             'database' => $this->config->getDatabase(),
             'schema' => $this->config->getSchema(),
             'timeout' => $this->config->getTimeout(),
-            'has_privateKey' => !empty($this->config->getPrivateKey()),
-            'has_publicKey' => !empty($this->config->getPublicKey()),
-            'has_passphrase' => !empty($this->config->getPrivateKeyPassphrase()),
+            'has_privateKey' => ! empty($this->config->getPrivateKey()),
+            'has_publicKey' => ! empty($this->config->getPublicKey()),
+            'has_passphrase' => ! empty($this->config->getPrivateKeyPassphrase()),
         ]);
     }
 
@@ -129,14 +128,14 @@ class SnowflakeService
             $this->debugLog('SnowflakeService: Connection test successful - token generated');
         } catch (Exception $e) {
             $this->handleError($e, 'Connection test failed');
-            throw new SnowflakeApiException("Connection test failed: " . $e->getMessage(), 0, $e);
+            throw new SnowflakeApiException('Connection test failed: '.$e->getMessage(), 0, $e);
         }
     }
 
     /**
      * Execute a SQL query and return the results as a collection
      *
-     * @param string $query The SQL query to execute
+     * @param  string  $query  The SQL query to execute
      * @return Collection The query results
      */
     public function ExecuteQuery(string $query): Collection
@@ -156,11 +155,12 @@ class SnowflakeService
             ]);
 
             $startTime = time();
-            while (!$result->isExecuted()) {
+            while (! $result->isExecuted()) {
                 $timeElapsed = time() - $startTime;
-                
+
                 if ($timeElapsed >= $this->config->getTimeout()) {
                     $this->cancelStatement($statementId);
+
                     return collect();
                 }
 
@@ -172,18 +172,18 @@ class SnowflakeService
             // Process result once all pages have been collected
             if ($result->getPageTotal() > 1) {
                 $this->debugLog('SnowflakeService: Multiple pages detected, retrieving all pages');
-                
+
                 // Create and process requests concurrently
                 $responses = [];
                 foreach (range(2, $result->getPageTotal()) as $page) {
                     $url = sprintf(
-                        'https://%s.snowflakecomputing.com/api/v2/statements/%s?%s', 
-                        $this->config->getAccount(), 
-                        $statementId, 
+                        'https://%s.snowflakecomputing.com/api/v2/statements/%s?%s',
+                        $this->config->getAccount(),
+                        $statementId,
                         http_build_query(['partition' => $page - 1])
                     );
                     $responses[$page] = $this->httpClient->request('GET', $url, [
-                        'headers' => $this->getHeaders()
+                        'headers' => $this->getHeaders(),
                     ]);
                 }
 
@@ -197,7 +197,7 @@ class SnowflakeService
                     }
                 }
             }
-            
+
             // Get the transformed data with column names as keys
             $data = $result->toArray();
             $this->debugLog('SnowflakeService: Processed result data', [
@@ -218,7 +218,7 @@ class SnowflakeService
 
     /**
      * Generate a Snowflake API access token using JWT
-     * 
+     *
      * This method will:
      * 1. Return cached token if available and not expired
      * 2. Use the private key content provided in the constructor
@@ -228,6 +228,7 @@ class SnowflakeService
      * 6. Return the serialized token
      *
      * @return string The JWT access token for Snowflake API
+     *
      * @throws Exception If unable to generate the token
      */
     private function getAccessToken(): string
@@ -235,39 +236,39 @@ class SnowflakeService
         // Use static cache for token across instances
         static $staticTokenCache = null;
         static $staticTokenExpiry = 0;
-        
+
         // Check static cache first for performance
         if ($staticTokenCache && time() < $staticTokenExpiry - 60) { // 1 minute buffer
             $this->debugLog('SnowflakeService: Using static cached access token');
-            
+
             // Also set instance properties for backward compatibility
             $this->cachedToken = $staticTokenCache;
             $this->tokenExpiry = $staticTokenExpiry;
-            
+
             return $staticTokenCache;
         }
-        
+
         // Generate a cache key based on account and user
         $cacheKey = "snowflake_api_token:{$this->config->getAccount()}:{$this->config->getUser()}";
-        
+
         // Try to get token from Laravel cache first
         $cachedTokenData = Cache::get($cacheKey);
-        
-        if ($cachedTokenData && 
-            isset($cachedTokenData['token']) && 
-            isset($cachedTokenData['expiry']) && 
+
+        if ($cachedTokenData &&
+            isset($cachedTokenData['token']) &&
+            isset($cachedTokenData['expiry']) &&
             time() < $cachedTokenData['expiry'] - 60) { // 1 minute buffer
-            
+
             $this->debugLog('SnowflakeService: Using cached access token from application cache');
-            
+
             // Also set instance properties for backward compatibility
             $this->cachedToken = $cachedTokenData['token'];
             $this->tokenExpiry = $cachedTokenData['expiry'];
-            
+
             // Update static cache
             $staticTokenCache = $cachedTokenData['token'];
             $staticTokenExpiry = $cachedTokenData['expiry'];
-            
+
             return $cachedTokenData['token'];
         }
 
@@ -276,11 +277,11 @@ class SnowflakeService
         try {
             // Use the private key content directly
             $keyContent = $this->config->getPrivateKey();
-            
+
             if (empty($keyContent)) {
-                throw new Exception("Private key content is empty");
+                throw new Exception('Private key content is empty');
             }
-            
+
             // Replace literal '\n' sequences with actual newlines
             $keyContent = str_replace('\n', "\n", $keyContent);
             $this->debugLog('SnowflakeService: Prepared private key content', [
@@ -288,7 +289,7 @@ class SnowflakeService
                 'contains_begin' => mb_strpos($keyContent, '-----BEGIN') !== false,
                 'contains_end' => mb_strpos($keyContent, '-----END') !== false,
             ]);
-            
+
             $this->debugLog('SnowflakeService: Creating JWK from private key');
             $privateKey = JWKFactory::createFromKey(
                 $keyContent,
@@ -302,20 +303,20 @@ class SnowflakeService
             // Log the complete JWK structure for debugging
             $this->debugLog('SnowflakeService: JWK details', [
                 'jwk_keys' => array_keys($privateKey->all()),
-                'jwk_values' => array_map(function($key) use ($privateKey) {
+                'jwk_values' => array_map(function ($key) use ($privateKey) {
                     // Only log non-sensitive keys
                     return in_array($key, ['alg', 'use', 'kty']) ? $privateKey->get($key) : '[REDACTED]';
-                }, array_keys($privateKey->all()))
+                }, array_keys($privateKey->all())),
             ]);
-            
+
             $this->debugLog('SnowflakeService: JWK created successfully');
 
-            $publicKeyFingerprint = 'SHA256:' . $this->config->getPublicKey();
+            $publicKeyFingerprint = 'SHA256:'.$this->config->getPublicKey();
             $this->debugLog('SnowflakeService: Using public key fingerprint', [
                 'raw_public_key' => $this->config->getPublicKey(),
                 'fingerprint' => $publicKeyFingerprint,
             ]);
-            
+
             $expires_in = time() + (60 * 60); // 1 hour expiry
             $payload = [
                 'iss' => sprintf('%s.%s', $this->config->getUser(), $publicKeyFingerprint),
@@ -334,7 +335,7 @@ class SnowflakeService
                 'raw_payload' => json_encode($payload),
             ]);
 
-            $algorithmManager = new AlgorithmManager([new RS256()]);
+            $algorithmManager = new AlgorithmManager([new RS256]);
             $jwsBuilder = new JWSBuilder($algorithmManager);
 
             $this->debugLog('SnowflakeService: Building JWS');
@@ -345,27 +346,27 @@ class SnowflakeService
                 ->build();
             $this->debugLog('SnowflakeService: JWS built successfully');
 
-            $serializer = new CompactSerializer();
+            $serializer = new CompactSerializer;
             $access_token = $serializer->serialize($jws);
 
             // Cache the token and its expiry in instance properties, Laravel cache, and static cache
             $this->cachedToken = $access_token;
             $this->tokenExpiry = $expires_in;
-            
+
             // Update static cache
             $staticTokenCache = $access_token;
             $staticTokenExpiry = $expires_in;
-            
+
             // Store token in Laravel cache with expiry
             $cacheData = [
                 'token' => $access_token,
                 'expiry' => $expires_in,
             ];
-            
+
             // Cache until 1 minute before expiry
             $cacheDuration = $expires_in - time() - 60;
             Cache::put($cacheKey, $cacheData, $cacheDuration);
-            
+
             $this->debugLog('SnowflakeService: Token stored in application cache', [
                 'cache_key' => $cacheKey,
                 'cache_duration' => $cacheDuration,
@@ -376,7 +377,7 @@ class SnowflakeService
             $token_start = mb_substr($access_token, 0, 10, 'UTF-8');
             $token_end = mb_substr($access_token, -10, null, 'UTF-8');
             $token_parts = explode('.', $access_token);
-            
+
             $this->debugLog('SnowflakeService: Access token generated successfully', [
                 'token_length' => mb_strlen($access_token, 'UTF-8'),
                 'token_preview' => "{$token_start}...{$token_end}",
@@ -400,14 +401,14 @@ class SnowflakeService
             return $access_token;
         } catch (Exception $e) {
             $this->handleError($e, 'Error generating access token');
-            throw new SnowflakeApiException("Failed to generate access token: " . $e->getMessage(), 0, $e);
+            throw new SnowflakeApiException('Failed to generate access token: '.$e->getMessage(), 0, $e);
         }
     }
 
     /**
      * Post a SQL statement to Snowflake for execution
      *
-     * @param string $statement The SQL statement to execute
+     * @param  string  $statement  The SQL statement to execute
      * @return string The statement handle ID
      */
     public function postStatement(string $statement): string
@@ -419,9 +420,9 @@ class SnowflakeService
         try {
             $url = $this->buildApiUrl('statements', [
                 'async' => 'true',
-                'nullable' => 'true'
+                'nullable' => 'true',
             ]);
-            
+
             $data = [
                 'statement' => $statement,
                 'warehouse' => $this->config->getWarehouse(),
@@ -436,10 +437,10 @@ class SnowflakeService
                     'TIMESTAMP_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF',
                     'TIMESTAMP_NTZ_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF',
                     'TIMESTAMP_LTZ_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM',
-                    'TIMESTAMP_TZ_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM'
-                ]
+                    'TIMESTAMP_TZ_OUTPUT_FORMAT' => 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM',
+                ],
             ];
-            
+
             $content = $this->makeRequest('POST', $url, [
                 'json' => $data,
             ]);
@@ -460,8 +461,8 @@ class SnowflakeService
     /**
      * Get statement results for a specific page
      *
-     * @param string $id Statement handle ID
-     * @param int $page Page number to retrieve (1-based)
+     * @param  string  $id  Statement handle ID
+     * @param  int  $page  Page number to retrieve (1-based)
      * @return array The statement results
      */
     public function getStatement(string $id, int $page): array
@@ -476,12 +477,12 @@ class SnowflakeService
                 'partition' => $page - 1,
             ]);
 
-            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements/%s?%s', 
-                $this->config->getAccount(), 
-                $id, 
+            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements/%s?%s',
+                $this->config->getAccount(),
+                $id,
                 $variables
             );
-            
+
             $result = $this->makeRequest('GET', $url);
 
             $this->debugLog('SnowflakeService: Statement results retrieved', [
@@ -503,7 +504,7 @@ class SnowflakeService
     /**
      * Cancel a running statement
      *
-     * @param string $id Statement handle ID to cancel
+     * @param  string  $id  Statement handle ID to cancel
      */
     public function cancelStatement(string $id): void
     {
@@ -512,31 +513,31 @@ class SnowflakeService
         ]);
 
         try {
-            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements/%s/cancel', 
-                $this->config->getAccount(), 
+            $url = sprintf('https://%s.snowflakecomputing.com/api/v2/statements/%s/cancel',
+                $this->config->getAccount(),
                 $id
             );
-            
+
             $response = $this->httpClient->request('POST', $url, [
                 'headers' => $this->getHeaders(),
             ]);
-            
+
             // Check the status code first
             $statusCode = $response->getStatusCode();
-            
+
             // Consider any 2xx status code as success for cancellation
             if ($statusCode >= 200 && $statusCode < 300) {
                 $this->debugLog('SnowflakeService: Cancellation successful based on status code', [
-                    'statusCode' => $statusCode
+                    'statusCode' => $statusCode,
                 ]);
-                
+
                 // Try to get content, but don't fail if it's empty
                 try {
                     $content = $response->getContent(false);
-                    
-                    if (!empty($content)) {
+
+                    if (! empty($content)) {
                         $responseData = json_decode($content, true);
-                        
+
                         if (is_array($responseData) && isset($responseData['code'])) {
                             $this->hasResult($responseData, [self::CODE_SUCCESS]);
                         }
@@ -544,12 +545,12 @@ class SnowflakeService
                 } catch (Exception $contentException) {
                     // Log but don't throw - if status code was 2xx, we consider it a success
                     Log::warning('SnowflakeService: Could not process response body, but status code indicates success', [
-                        'error' => $contentException->getMessage()
+                        'error' => $contentException->getMessage(),
                     ]);
                 }
             } else {
                 Log::error('SnowflakeService: Cancellation failed with status code', [
-                    'statusCode' => $statusCode
+                    'statusCode' => $statusCode,
                 ]);
                 throw new Exception("Failed to cancel statement, received status code: {$statusCode}");
             }
@@ -564,7 +565,7 @@ class SnowflakeService
     /**
      * Get the result for a statement
      *
-     * @param string $id Statement handle ID
+     * @param  string  $id  Statement handle ID
      * @return Result The statement result
      */
     public function getResult(string $id): Result
@@ -575,6 +576,7 @@ class SnowflakeService
 
         try {
             $data = $this->getStatement($id, 1);
+
             return $this->processResultData($data);
         } catch (Exception $e) {
             $this->handleError($e, 'Error getting result', ['statementId' => $id]);
@@ -585,18 +587,18 @@ class SnowflakeService
     /**
      * Process and validate result data into a Result object
      *
-     * @param array $data The data to process
+     * @param  array  $data  The data to process
      * @return Result The processed result
      */
     private function processResultData(array $data): Result
     {
         $executed = $data['code'] === self::CODE_SUCCESS;
-        
+
         $result = new Result($this);
         $result->setId($data['statementHandle']);
         $result->setExecuted($executed);
 
-        if (false === $executed) {
+        if ($executed === false) {
             return $result;
         }
 
@@ -615,7 +617,8 @@ class SnowflakeService
     /**
      * Validate the structure of result data
      *
-     * @param array $data The data to validate
+     * @param  array  $data  The data to validate
+     *
      * @throws Exception If validation fails
      */
     private function validateResultStructure(array $data): void
@@ -623,8 +626,8 @@ class SnowflakeService
         // Check for all required fields at once
         $requiredTopLevelFields = ['resultSetMetaData', 'data', 'createdOn'];
         $missingTopLevelFields = array_diff($requiredTopLevelFields, array_keys($data));
-        
-        if (!empty($missingTopLevelFields)) {
+
+        if (! empty($missingTopLevelFields)) {
             $errorMsg = sprintf('Objects "%s" not found', implode(', ', $missingTopLevelFields));
             Log::error('SnowflakeService: Required fields missing in response', [
                 'missing_fields' => $missingTopLevelFields,
@@ -636,8 +639,8 @@ class SnowflakeService
         // Only proceed if metadata exists
         $requiredMetaFields = ['numRows', 'partitionInfo', 'rowType'];
         $missingMetaFields = array_diff($requiredMetaFields, array_keys($data['resultSetMetaData']));
-        
-        if (!empty($missingMetaFields)) {
+
+        if (! empty($missingMetaFields)) {
             $errorMsg = sprintf('Objects "%s" in "resultSetMetaData" not found', implode(', ', $missingMetaFields));
             Log::error('SnowflakeService: Required metadata fields missing in response', [
                 'missing_fields' => $missingMetaFields,
@@ -650,8 +653,9 @@ class SnowflakeService
     /**
      * Validate that a result has expected codes
      *
-     * @param array $data The data to validate
-     * @param array $codes Expected valid codes
+     * @param  array  $data  The data to validate
+     * @param  array  $codes  Expected valid codes
+     *
      * @throws Exception If validation fails
      */
     private function hasResult(array $data, array $codes): void
@@ -663,7 +667,7 @@ class SnowflakeService
 
         try {
             foreach (['code', 'message'] as $field) {
-                if (false === array_key_exists($field, $data)) {
+                if (array_key_exists($field, $data) === false) {
                     Log::error('SnowflakeService: Required field missing in response', [
                         'field' => $field,
                         'keys_present' => array_keys($data),
@@ -672,7 +676,7 @@ class SnowflakeService
                 }
             }
 
-            if (false === in_array($data['code'], $codes)) {
+            if (in_array($data['code'], $codes) === false) {
                 Log::error('SnowflakeService: Unexpected result code', [
                     'expected_codes' => $codes,
                     'actual_code' => $data['code'],
@@ -682,7 +686,7 @@ class SnowflakeService
             }
 
             foreach (['statementHandle', 'statementStatusUrl'] as $field) {
-                if (false === array_key_exists($field, $data)) {
+                if (array_key_exists($field, $data) === false) {
                     Log::error('SnowflakeService: Required field missing in response', [
                         'field' => $field,
                         'keys_present' => array_keys($data),
@@ -703,13 +707,13 @@ class SnowflakeService
     {
         static $cachedHeaders = null;
         static $headerExpiry = 0;
-        
+
         // Return cached headers if they're not close to expiring
         $currentTime = time();
         if ($cachedHeaders !== null && $currentTime < $headerExpiry - 120) {
             return $cachedHeaders;
         }
-        
+
         $accessToken = $this->getAccessToken();
         $cachedHeaders = [
             sprintf('Authorization: Bearer %s', $accessToken),
@@ -717,19 +721,19 @@ class SnowflakeService
             'User-Agent: SnowflakeService/0.5',
             'X-Snowflake-Authorization-Token-Type: KEYPAIR_JWT',
         ];
-        
+
         // Set header expiry to 2 minutes before token expiry
         $headerExpiry = $this->tokenExpiry - 120;
-        
+
         return $cachedHeaders;
     }
 
     /**
      * Make a request to the Snowflake API
      *
-     * @param string $method HTTP method (GET, POST, etc.)
-     * @param string $url URL to request
-     * @param array $options Request options
+     * @param  string  $method  HTTP method (GET, POST, etc.)
+     * @param  string  $url  URL to request
+     * @param  array  $options  Request options
      * @return array Response as array
      */
     private function makeRequest(string $method, string $url, array $options = []): array
@@ -741,9 +745,9 @@ class SnowflakeService
 
         try {
             $options['headers'] = $this->getHeaders();
-            
+
             $response = $this->httpClient->request($method, $url, $options);
-            
+
             return $this->toArray($response);
         } catch (Exception $e) {
             $this->handleError($e, 'Error making request', [
@@ -757,7 +761,7 @@ class SnowflakeService
     /**
      * Convert a ResponseInterface to an array
      *
-     * @param ResponseInterface $response The response to convert
+     * @param  ResponseInterface  $response  The response to convert
      * @return array The response as array
      */
     private function toArray(ResponseInterface $response): array
@@ -769,7 +773,7 @@ class SnowflakeService
             }
 
             $headers = $response->getHeaders(false);
-            
+
             // Handle gzip content in one step
             if ('gzip' === ($headers['content-encoding'][0] ?? null)) {
                 $content = $this->gzdecode($content);
@@ -783,13 +787,13 @@ class SnowflakeService
 
             // Decode with optimized options
             $data = json_decode($content, true, 512, JSON_BIGINT_AS_STRING | JSON_THROW_ON_ERROR);
-            
+
             $statusCode = $response->getStatusCode();
             if ($statusCode >= 400) {
                 throw new Exception(sprintf(
-                    'Snowflake error, %s returned with message: %s', 
-                    $statusCode, 
-                    $data["message"] ?? 'Unknown error'
+                    'Snowflake error, %s returned with message: %s',
+                    $statusCode,
+                    $data['message'] ?? 'Unknown error'
                 ), $statusCode);
             }
 
@@ -803,7 +807,7 @@ class SnowflakeService
     /**
      * Decompress gzipped content
      *
-     * @param string $data The compressed data
+     * @param  string  $data  The compressed data
      * @return string The decompressed content
      */
     private function gzdecode(string $data): string
@@ -819,47 +823,47 @@ class SnowflakeService
         if ($inflate === false) {
             throw new Exception('Failed to initialize inflate');
         }
-        
+
         // Process larger chunks to reduce iterations
         $content = '';
         $chunkSize = 8192; // 8KB chunks instead of byte-by-byte
         $offset = 0;
         $dataLength = mb_strlen($data, 'UTF-8');
-        
+
         do {
             $chunk = inflate_add(
-                $inflate, 
+                $inflate,
                 mb_substr($data, $offset, min($chunkSize, $dataLength - $offset), 'UTF-8')
             );
             if ($chunk === false) {
-                throw new Exception('Failed to decompress chunk at offset ' . $offset);
+                throw new Exception('Failed to decompress chunk at offset '.$offset);
             }
             $content .= $chunk;
 
-            if (ZLIB_STREAM_END === inflate_get_status($inflate)) {
+            if (inflate_get_status($inflate) === ZLIB_STREAM_END) {
                 $offset += inflate_get_read_len($inflate);
             }
         } while ($offset < $dataLength);
-        
+
         return $content;
     }
 
     /**
      * Handle and log errors consistently
      *
-     * @param Exception $e The exception to handle
-     * @param string $context Context information
-     * @param array $additionalData Additional data to log
+     * @param  Exception  $e  The exception to handle
+     * @param  string  $context  Context information
+     * @param  array  $additionalData  Additional data to log
      */
     private function handleError(Exception $e, string $context, array $additionalData = []): void
     {
         $errorData = array_merge([
             'error' => $e->getMessage(),
             'trace' => $e->getTraceAsString(),
-            'context' => $context
+            'context' => $context,
         ], $additionalData);
-        
-        Log::error('SnowflakeService: ' . $context, $errorData);
+
+        Log::error('SnowflakeService: '.$context, $errorData);
     }
 
     /**
@@ -868,12 +872,12 @@ class SnowflakeService
     private function buildApiUrl(string $endpoint, array $params = []): string
     {
         $baseUrl = sprintf('https://%s.snowflakecomputing.com/api/v2', $this->config->getAccount());
-        $fullUrl = $baseUrl . '/' . ltrim($endpoint, '/');
-        
-        if (!empty($params)) {
-            $fullUrl .= '?' . http_build_query($params);
+        $fullUrl = $baseUrl.'/'.ltrim($endpoint, '/');
+
+        if (! empty($params)) {
+            $fullUrl .= '?'.http_build_query($params);
         }
-        
+
         return $fullUrl;
     }
 }

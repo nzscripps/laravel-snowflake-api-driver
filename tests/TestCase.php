@@ -2,15 +2,13 @@
 
 namespace Tests;
 
-use Orchestra\Testbench\TestCase as BaseTestCase;
 use LaravelSnowflakeApi\SnowflakeApiServiceProvider;
+use Orchestra\Testbench\TestCase as BaseTestCase;
 
 abstract class TestCase extends BaseTestCase
 {
     /**
      * Setup the test environment.
-     *
-     * @return void
      */
     protected function setUp(): void
     {
@@ -18,7 +16,7 @@ abstract class TestCase extends BaseTestCase
 
         // Environment variable check moved to Integration test setup.
     }
-    
+
     /**
      * Define environment setup.
      *
@@ -32,25 +30,25 @@ abstract class TestCase extends BaseTestCase
 
         // Setup Snowflake connection details from environment variables
         $app['config']->set('database.connections.snowflake', [
-            'driver'                 => 'snowflake_api', // Use the custom driver name
-            'host'                   => env('SNOWFLAKE_TEST_URL'), // Use SNOWFLAKE_TEST_URL
-            'account'                => env('SNOWFLAKE_TEST_ACCOUNT'), // Use SNOWFLAKE_TEST_ACCOUNT
-            'username'               => env('SNOWFLAKE_TEST_USER'), // Use SNOWFLAKE_TEST_USER
-            'password'               => env('SNOWFLAKE_PASSWORD'), // Optional, if using key pair (Keep non-TEST version? Check .env)
-            'public_key'             => env('SNOWFLAKE_TEST_PUBLIC_KEY'), // Use SNOWFLAKE_TEST_PUBLIC_KEY
-            'private_key'            => env('SNOWFLAKE_TEST_PRIVATE_KEY'), // Use SNOWFLAKE_TEST_PRIVATE_KEY
+            'driver' => 'snowflake_api', // Use the custom driver name
+            'host' => env('SNOWFLAKE_TEST_URL'), // Use SNOWFLAKE_TEST_URL
+            'account' => env('SNOWFLAKE_TEST_ACCOUNT'), // Use SNOWFLAKE_TEST_ACCOUNT
+            'username' => env('SNOWFLAKE_TEST_USER'), // Use SNOWFLAKE_TEST_USER
+            'password' => env('SNOWFLAKE_PASSWORD'), // Optional, if using key pair (Keep non-TEST version? Check .env)
+            'public_key' => env('SNOWFLAKE_TEST_PUBLIC_KEY'), // Use SNOWFLAKE_TEST_PUBLIC_KEY
+            'private_key' => env('SNOWFLAKE_TEST_PRIVATE_KEY'), // Use SNOWFLAKE_TEST_PRIVATE_KEY
             'private_key_passphrase' => env('SNOWFLAKE_TEST_PASSPHRASE'), // Use SNOWFLAKE_TEST_PASSPHRASE
-            'warehouse'              => env('SNOWFLAKE_TEST_WAREHOUSE'), // Use SNOWFLAKE_TEST_WAREHOUSE
-            'database'               => env('SNOWFLAKE_TEST_DATABASE'), // Use SNOWFLAKE_TEST_DATABASE
-            'schema'                 => env('SNOWFLAKE_TEST_SCHEMA'), // Use SNOWFLAKE_TEST_SCHEMA
-            'timeout'                => env('SNOWFLAKE_TIMEOUT', 30), // Keep non-TEST version? Check .env
-            'prefix'                 => '', // No prefix usually needed
+            'warehouse' => env('SNOWFLAKE_TEST_WAREHOUSE'), // Use SNOWFLAKE_TEST_WAREHOUSE
+            'database' => env('SNOWFLAKE_TEST_DATABASE'), // Use SNOWFLAKE_TEST_DATABASE
+            'schema' => env('SNOWFLAKE_TEST_SCHEMA'), // Use SNOWFLAKE_TEST_SCHEMA
+            'timeout' => env('SNOWFLAKE_TIMEOUT', 30), // Keep non-TEST version? Check .env
+            'prefix' => '', // No prefix usually needed
         ]);
 
         // Set debug logging based on env variable
         $app['config']->set('snowflake.debug_logging', env('SF_DEBUG', false));
     }
-    
+
     /**
      * Get package providers.
      *
@@ -63,14 +61,13 @@ abstract class TestCase extends BaseTestCase
             SnowflakeApiServiceProvider::class,
         ];
     }
-    
+
     /**
      * Set a protected property on an object using reflection
      *
-     * @param object $object The object to set the property on
-     * @param string $property The property name
-     * @param mixed $value The value to set
-     * @return void
+     * @param  object  $object  The object to set the property on
+     * @param  string  $property  The property name
+     * @param  mixed  $value  The value to set
      */
     protected function setPrivateProperty(object $object, string $property, mixed $value): void
     {
@@ -78,18 +75,19 @@ abstract class TestCase extends BaseTestCase
         $property = $reflection->getProperty($property);
         $property->setValue($object, $value);
     }
-    
+
     /**
      * Get a protected property value using reflection
      *
-     * @param object $object The object to get the property from
-     * @param string $property The property name
+     * @param  object  $object  The object to get the property from
+     * @param  string  $property  The property name
      * @return mixed The property value
      */
     protected function getPrivateProperty(object $object, string $property): mixed
     {
         $reflection = new \ReflectionClass($object);
         $property = $reflection->getProperty($property);
+
         return $property->getValue($object);
     }
-} 
+}

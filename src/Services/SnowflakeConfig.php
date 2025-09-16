@@ -7,29 +7,38 @@ namespace LaravelSnowflakeApi\Services;
 class SnowflakeConfig
 {
     private $baseUrl;
+
     private $account;
+
     private $user;
+
     private $publicKey;
+
     private $privateKey;
+
     private $privateKeyPassphrase;
+
     private $warehouse;
+
     private $database;
+
     private $schema;
+
     private $timeout;
 
     /**
      * Initialize the Snowflake API configuration
-     * 
-     * @param string $baseUrl The base URL for the Snowflake API
-     * @param string $account The Snowflake account identifier
-     * @param string $user The Snowflake username
-     * @param string $publicKey The public key fingerprint
-     * @param string $privateKey The private key content (PEM format)
-     * @param string $privateKeyPassphrase The passphrase for the private key
-     * @param string $warehouse The Snowflake warehouse to use
-     * @param string $database The Snowflake database to use
-     * @param string $schema The Snowflake schema to use
-     * @param int $timeout Timeout in seconds for query execution
+     *
+     * @param  string  $baseUrl  The base URL for the Snowflake API
+     * @param  string  $account  The Snowflake account identifier
+     * @param  string  $user  The Snowflake username
+     * @param  string  $publicKey  The public key fingerprint
+     * @param  string  $privateKey  The private key content (PEM format)
+     * @param  string  $privateKeyPassphrase  The passphrase for the private key
+     * @param  string  $warehouse  The Snowflake warehouse to use
+     * @param  string  $database  The Snowflake database to use
+     * @param  string  $schema  The Snowflake schema to use
+     * @param  int  $timeout  Timeout in seconds for query execution
      */
     public function __construct(
         string $baseUrl,
@@ -134,4 +143,4 @@ class SnowflakeConfig
     {
         return $this->timeout;
     }
-} 
+}

@@ -2,9 +2,9 @@
 
 namespace LaravelSnowflakeApi\Flavours\Snowflake;
 
-use Illuminate\Support\Str;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Processors\Processor as BaseProcessor;
+use Illuminate\Support\Str;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 
 class Processor extends BaseProcessor
@@ -23,7 +23,7 @@ class Processor extends BaseProcessor
     /**
      * Process the results of a column listing query.
      *
-     * @param array<int, array<string, mixed>> $results
+     * @param  array<int, array<string, mixed>>  $results
      * @return array<int, string>
      */
     public function processColumnListing($results): array
@@ -40,10 +40,9 @@ class Processor extends BaseProcessor
      * and potentially unreliable under concurrency. Snowflake's `LAST_QUERY_ID()`
      * or sequence usage might be better alternatives if the API supports them.
      *
-     * @param \Illuminate\Database\Query\Builder $query
-     * @param string $sql
-     * @param array $values
-     * @param string|null $sequence
+     * @param  string  $sql
+     * @param  array  $values
+     * @param  string|null  $sequence
      * @return int|string The auto-incrementing ID.
      */
     public function processInsertGetId(Builder $query, $sql, $values, $sequence = null): int|string
@@ -60,7 +59,7 @@ class Processor extends BaseProcessor
 
         $result = $connection->selectOne(sprintf('select max(%s) as %s from %s', $wrappedIdColumn, $wrappedIdColumn, $wrappedTable));
 
-        if (!$result) {
+        if (! $result) {
             return 0;
         }
 
@@ -73,13 +72,12 @@ class Processor extends BaseProcessor
      * Process the results of a "select" query.
      * The base processor doesn't do much here, so this override might be unnecessary.
      *
-     * @param \Illuminate\Database\Query\Builder $query
-     * @param array $results
-     * @return array
+     * @param  array  $results
      */
     public function processSelect(Builder $query, $results): array
     {
         $this->debugLog('processSelect', ['result_count' => count($results)]);
+
         return $results;
     }
 }

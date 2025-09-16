@@ -2,17 +2,12 @@
 
 namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 
-use DateTimeInterface;
 use Illuminate\Database\Connection;
-use Illuminate\Database\Query\Expression;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Grammars\Grammar;
 use Illuminate\Support\Fluent;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use LaravelSnowflakeApi\Traits\DebugLogging;
-use RuntimeException;
 
 class SchemaGrammar extends Grammar
 {
@@ -35,7 +30,6 @@ class SchemaGrammar extends Grammar
     /**
      * Create a new schema grammar instance.
      *
-     * @param \Illuminate\Database\Connection|null $connection
      * @return void
      */
     public function __construct(?Connection $connection = null)
@@ -51,7 +45,6 @@ class SchemaGrammar extends Grammar
     /**
      * Set the connection instance.
      *
-     * @param  \Illuminate\Database\Connection  $connection
      * @return $this
      */
     public function setConnection(Connection $connection)
@@ -90,7 +83,7 @@ class SchemaGrammar extends Grammar
      * @var list<string>
      */
     protected $modifiers = [
-        'Collate', 'Comment', 'Default', 'Increment', 'Nullable', 'StoredAs', 'VirtualAs', 'Srid' // Added standard modifiers
+        'Collate', 'Comment', 'Default', 'Increment', 'Nullable', 'StoredAs', 'VirtualAs', 'Srid', // Added standard modifiers
     ];
 
     /**
@@ -111,43 +104,43 @@ class SchemaGrammar extends Grammar
     /**
      * Compile the query to determine the list of tables.
      *
-     * @param string|null $schema
-     * @return string
+     * @param  string|null  $schema
      */
     public function compileTables($schema = null): string
     {
-        $schema = $schema ?? $this->connection->getConfig("schema");
+        $schema = $schema ?? $this->connection->getConfig('schema');
         // Quote the schema name properly
         $schema = $this->quoteString($schema);
+
         return "show tables in schema {$schema}";
     }
 
-     /**
-      * Compile the query to determine the list of views.
-      *
-      * @param  string|null  $schema
-      * @return string
-      */
-     public function compileViews($schema = null): string
-     {
-        $schema = $schema ?? $this->connection->getConfig("schema");
+    /**
+     * Compile the query to determine the list of views.
+     *
+     * @param  string|null  $schema
+     */
+    public function compileViews($schema = null): string
+    {
+        $schema = $schema ?? $this->connection->getConfig('schema');
         $schema = $this->quoteString($schema);
+
         return "show views in schema {$schema}";
-     }
+    }
 
     /**
      * Compile the query to determine the list of columns for a given table.
      *
-     * @param string|null $schema
-     * @param string $table
-     * @return string
+     * @param  string|null  $schema
+     * @param  string  $table
      */
     public function compileColumns($schema, $table): string
     {
-        $schema = $schema ?? $this->connection->getConfig("schema");
+        $schema = $schema ?? $this->connection->getConfig('schema');
         // Quote identifiers
         $schema = $this->quoteString($schema);
         $table = $this->quoteString($table);
+
         return "show columns in table {$schema}.{$table}";
         // Alternative: Query information_schema.columns for more details if needed
         // return sprintf('select column_name from information_schema.columns where table_schema = %s and table_name = %s order by ordinal_position', $schema, $table);
@@ -156,20 +149,17 @@ class SchemaGrammar extends Grammar
     /**
      * Compile a create table command.
      *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @param \Illuminate\Database\Connection $connection // Added connection parameter
-     * @return string
+     * @param  \Illuminate\Database\Connection  $connection  // Added connection parameter
      */
     public function compileCreate(Blueprint $blueprint, Fluent $command, Connection $connection): string // Add return type hint
     {
         $columns = implode(', ', $this->getColumns($blueprint));
         $sql = $blueprint->temporary ? 'create temporary table ' : 'create table ';
-        $sql .= $this->wrapTable($blueprint) . " ($columns)";
+        $sql .= $this->wrapTable($blueprint)." ($columns)";
 
         // Add table comment if specified
         if (isset($blueprint->comment)) {
-            $sql .= ' comment = ' . $this->quoteString($blueprint->comment);
+            $sql .= ' comment = '.$this->quoteString($blueprint->comment);
         }
 
         return $sql;
@@ -177,39 +167,29 @@ class SchemaGrammar extends Grammar
 
     /**
      * Compile an add column command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileAdd(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
         $columns = $this->prefixArray('add column', $this->getColumns($blueprint)); // Use "add column"
-        return 'alter table ' . $this->wrapTable($blueprint) . ' ' . implode(', ', $columns);
+
+        return 'alter table '.$this->wrapTable($blueprint).' '.implode(', ', $columns);
     }
 
     /**
      * Compile a primary key command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compilePrimary(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
         $columns = $this->columnize($command->columns);
         $tableName = $this->wrapTable($blueprint);
         // Constraint name format: table_pk
-        $constraint = $this->wrap($blueprint->getTable() . '_pk');
+        $constraint = $this->wrap($blueprint->getTable().'_pk');
+
         return "alter table {$tableName} add constraint {$constraint} primary key ({$columns})";
     }
 
     /**
      * Compile a unique key command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileUnique(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
@@ -217,166 +197,129 @@ class SchemaGrammar extends Grammar
         $tableName = $this->wrapTable($blueprint);
         // Use the provided index name
         $constraint = $this->wrap($command->index);
+
         return "alter table {$tableName} add constraint {$constraint} unique ({$columns})";
     }
 
     /**
      * Compile a plain index key command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileIndex(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
         $columns = $this->columnize($command->columns);
         $indexName = $this->wrap($command->index);
         $tableName = $this->wrapTable($blueprint);
+
         return "create index {$indexName} on {$tableName} ({$columns})";
     }
 
     /**
      * Compile a drop table command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileDrop(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
-        return 'drop table ' . $this->wrapTable($blueprint);
+        return 'drop table '.$this->wrapTable($blueprint);
     }
 
     /**
      * Compile a drop table (if exists) command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileDropIfExists(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
-        return 'drop table if exists ' . $this->wrapTable($blueprint);
+        return 'drop table if exists '.$this->wrapTable($blueprint);
     }
 
     /**
      * Compile a drop column command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileDropColumn(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
         $columns = $this->prefixArray('drop column', $this->wrapArray($command->columns));
         $tableName = $this->wrapTable($blueprint);
-        return "alter table {$tableName} " . implode(', ', $columns);
+
+        return "alter table {$tableName} ".implode(', ', $columns);
     }
 
     /**
      * Compile a drop primary key command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileDropPrimary(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
-        $constraint = $this->wrap($blueprint->getTable() . '_pk');
+        $constraint = $this->wrap($blueprint->getTable().'_pk');
         $tableName = $this->wrapTable($blueprint);
+
         return "alter table {$tableName} drop constraint {$constraint}";
     }
 
     /**
      * Compile a drop unique key command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileDropUnique(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
         $index = $this->wrap($command->index);
         $tableName = $this->wrapTable($blueprint);
+
         return "alter table {$tableName} drop constraint {$index}";
     }
 
     /**
      * Compile a drop index command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileDropIndex(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
         $index = $this->wrap($command->index);
+
         // Snowflake drops index without specifying table name
         return "drop index {$index}";
     }
 
     /**
      * Compile a drop spatial index command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileDropSpatialIndex(Blueprint $blueprint, Fluent $command): string
     {
         // Spatial indexes might not be standard in Snowflake, treat as regular index
         $this->debugLog('compileDropSpatialIndex treated as compileDropIndex', ['index' => $command->index]);
+
         return $this->compileDropIndex($blueprint, $command);
     }
 
     /**
      * Compile a drop foreign key command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileDropForeign(Blueprint $blueprint, Fluent $command): string
     {
         $index = $this->wrap($command->index);
         $tableName = $this->wrapTable($blueprint);
+
         return "alter table {$tableName} drop constraint {$index}";
     }
 
     /**
      * Compile a rename table command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileRename(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
         $from = $this->wrapTable($blueprint);
         $to = $this->wrapTable($command->to);
+
         return "alter table {$from} rename to {$to}";
     }
 
     /**
      * Compile a rename index command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileRenameIndex(Blueprint $blueprint, Fluent $command): string // Add return type hint
     {
         $from = $this->wrap($command->from);
         $to = $this->wrap($command->to);
+
         return "alter index {$from} rename to {$to}";
     }
 
     /**
      * Compile a rename column command.
      *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      * @throws \RuntimeException
      */
     public function compileRenameColumn(Blueprint $blueprint, Fluent $command): string
@@ -384,15 +327,13 @@ class SchemaGrammar extends Grammar
         $table = $this->wrapTable($blueprint);
         $from = $this->wrap($command->from);
         $to = $this->wrap($command->to);
+
         return "alter table {$table} rename column {$from} to {$to}";
     }
 
     /**
      * Compile a change column command into a series of SQL statements.
      *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return array|string
      *
      * @throws \RuntimeException
      */
@@ -403,7 +344,7 @@ class SchemaGrammar extends Grammar
 
         foreach ($this->getColumns($blueprint) as $column) {
             // Compile the definition for the new column state
-            $newDefinition = $this->getType($column) . $this->addModifiers('', $blueprint, $column);
+            $newDefinition = $this->getType($column).$this->addModifiers('', $blueprint, $column);
             $columnName = $this->wrap($column->name);
 
             // Construct the ALTER TABLE ... MODIFY COLUMN statement
@@ -411,9 +352,9 @@ class SchemaGrammar extends Grammar
 
             // Handle rename separately if needed (Snowflake doesn't combine modify/rename)
             if (isset($column->renameTo)) {
-                 $from = $this->wrap($column->name);
-                 $to = $this->wrap($column->renameTo);
-                 $changes[] = "alter table {$table} rename column {$from} to {$to}";
+                $from = $this->wrap($column->name);
+                $to = $this->wrap($column->renameTo);
+                $changes[] = "alter table {$table} rename column {$from} to {$to}";
             }
         }
 
@@ -422,26 +363,17 @@ class SchemaGrammar extends Grammar
 
     /**
      * Compile a comment command.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $command
-     * @return string
      */
     public function compileComment(Blueprint $blueprint, Fluent $command): string
     {
         $table = $this->wrapTable($blueprint);
         $comment = $this->quoteString($command->comment);
+
         return "comment on table {$table} is {$comment}";
     }
 
     /**
      * Compile a create view command.
-     *
-     * @param  string  $view
-     * @param  string  $select
-     * @param  bool  $orReplace
-     * @param  bool  $materialized
-     * @return string
      */
     public function compileCreateView(string $view, string $select, bool $orReplace = false, bool $materialized = false): string
     {
@@ -454,34 +386,29 @@ class SchemaGrammar extends Grammar
 
     /**
      * Compile a drop view command.
-     *
-     * @param  string  $view
-     * @return string
      */
     public function compileDropView(string $view): string
     {
         $view = $this->wrapTable($view);
+
         return "drop view {$view}";
     }
 
     /**
      * Compile a drop view (if exists) command.
-     *
-     * @param  string  $view
-     * @return string
      */
     public function compileDropViewIfExists(string $view): string
     {
         $view = $this->wrapTable($view);
+
         return "drop view if exists {$view}";
     }
 
     /**
      * Wrap a table in keyword identifiers.
      *
-     * @param mixed $table
-     * @param string|null $prefix
-     * @return string
+     * @param  mixed  $table
+     * @param  string|null  $prefix
      */
     public function wrapTable($table, $prefix = null): string
     {
@@ -489,27 +416,23 @@ class SchemaGrammar extends Grammar
         if ($table instanceof Blueprint) {
             $table = $table->getTable();
         }
-        
+
         $tableName = (string) $table;
-        
+
         // Apply case sensitivity setting
         if (! env('SNOWFLAKE_COLUMNS_CASE_SENSITIVE', false)) {
             $tableName = Str::upper($tableName);
         }
-        
+
         // Apply prefix if provided or use the current tablePrefix
-        $prefixedTableName = ($prefix ?? $this->tablePrefix) . $tableName;
-        
+        $prefixedTableName = ($prefix ?? $this->tablePrefix).$tableName;
+
         // Wrap the table name
-        return '"' . str_replace('"', '""', $prefixedTableName) . '"';
+        return '"'.str_replace('"', '""', $prefixedTableName).'"';
     }
 
     /**
      * Get the SQL for a nullable column modifier.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $column
-     * @return string|null
      */
     protected function modifyNullable(Blueprint $blueprint, Fluent $column): ?string // Add return type hint
     {
@@ -519,25 +442,18 @@ class SchemaGrammar extends Grammar
 
     /**
      * Get the SQL for a default column modifier.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $column
-     * @return string|null
      */
     protected function modifyDefault(Blueprint $blueprint, Fluent $column): ?string // Add return type hint
     {
         if (! is_null($column->default)) {
-            return ' default ' . $this->getDefaultValue($column->default);
+            return ' default '.$this->getDefaultValue($column->default);
         }
+
         return null;
     }
 
     /**
      * Get the SQL for an auto-increment column modifier.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $column
-     * @return string|null
      */
     protected function modifyIncrement(Blueprint $blueprint, Fluent $column): ?string // Add return type hint
     {
@@ -546,22 +462,20 @@ class SchemaGrammar extends Grammar
             // AUTOINCREMENT implies START 1 INCREMENT 1
             return ' autoincrement';
         }
+
         return null;
     }
 
     /**
      * Get the SQL for a comment column modifier.
-     *
-     * @param \Illuminate\Database\Schema\Blueprint $blueprint
-     * @param \Illuminate\Support\Fluent $column
-     * @return string|null
      */
     protected function modifyComment(Blueprint $blueprint, Fluent $column): ?string // Add return type hint
     {
         if (! is_null($column->comment)) {
             // Comments need single quotes for the string literal
-            return ' comment ' . $this->quoteString($column->comment);
+            return ' comment '.$this->quoteString($column->comment);
         }
+
         return null;
     }
 
@@ -570,14 +484,14 @@ class SchemaGrammar extends Grammar
      *
      * @param  \\Illuminate\\Database\\Schema\\Blueprint  $blueprint
      * @param  \\Illuminate\\Support\\Fluent  $column
-     * @return string|null
      */
     protected function modifyCollate(Blueprint $blueprint, Fluent $column): ?string
     {
         if (! is_null($column->collation)) {
             // Snowflake uses COLLATE keyword
-            return ' collate \'' . $column->collation . '\'';
+            return ' collate \''.$column->collation.'\'';
         }
+
         return null;
     }
 
@@ -588,9 +502,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a char type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeChar(Fluent $column): string
     {
@@ -599,21 +510,15 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a string type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeString(Fluent $column): string // Add return type hint
     {
         // VARCHAR is standard, use length if provided
-        return 'varchar(' . ($column->length ?? 255) . ')';
+        return 'varchar('.($column->length ?? 255).')';
     }
 
     /**
      * Create the column definition for a text type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeText(Fluent $column): string // Add return type hint
     {
@@ -623,9 +528,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a medium text type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeMediumText(Fluent $column): string // Add return type hint
     {
@@ -634,9 +536,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a long text type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeLongText(Fluent $column): string // Add return type hint
     {
@@ -645,9 +544,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for an integer type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeInteger(Fluent $column): string // Add return type hint
     {
@@ -657,9 +553,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a big integer type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeBigInteger(Fluent $column): string // Add return type hint
     {
@@ -669,9 +562,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a medium integer type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeMediumInteger(Fluent $column): string
     {
@@ -680,9 +570,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a tiny integer type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeTinyInteger(Fluent $column): string
     {
@@ -691,9 +578,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a small integer type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeSmallInteger(Fluent $column): string
     {
@@ -702,9 +586,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a float type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeFloat(Fluent $column): string // Add return type hint
     {
@@ -714,9 +595,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a double type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeDouble(Fluent $column): string // Add return type hint
     {
@@ -726,9 +604,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a real type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeReal(Fluent $column): string
     {
@@ -737,23 +612,18 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a decimal type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeDecimal(Fluent $column): string // Add return type hint
     {
         // NUMBER(p, s) or DECIMAL(p, s)
         $total = $column->total ?? 10;
         $places = $column->places ?? 2;
+
         return "decimal({$total}, {$places})";
     }
 
     /**
      * Create the column definition for a boolean type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeBoolean(Fluent $column): string // Add return type hint
     {
@@ -762,9 +632,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a date type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeDate(Fluent $column): string // Add return type hint
     {
@@ -773,80 +640,60 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a date-time type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeDateTime(Fluent $column): string // Add return type hint
     {
         // TIMESTAMP_NTZ (No Time Zone) is often preferred
-        return 'timestamp_ntz' . ($column->precision ? '(' . $column->precision . ')' : '');
+        return 'timestamp_ntz'.($column->precision ? '('.$column->precision.')' : '');
     }
 
     /**
      * Create the column definition for a date-time (with time zone) type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeDateTimeTz(Fluent $column): string
     {
         // TIMESTAMP_TZ (Time Zone)
-        return 'timestamp_tz' . ($column->precision ? '(' . $column->precision . ')' : '');
+        return 'timestamp_tz'.($column->precision ? '('.$column->precision.')' : '');
     }
 
     /**
      * Create the column definition for a time type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeTime(Fluent $column): string // Add return type hint
     {
-        return 'time' . ($column->precision ? '(' . $column->precision . ')' : '');
+        return 'time'.($column->precision ? '('.$column->precision.')' : '');
     }
 
     /**
      * Create the column definition for a time (with time zone) type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeTimeTz(Fluent $column): string
     {
         // Snowflake doesn't have a direct TIME_TZ type. Use TIMESTAMP_TZ?
         $this->debugLog('typeTimeTz mapped to TIMESTAMP_TZ', ['column' => $column->name]);
-        return 'timestamp_tz' . ($column->precision ? '(' . $column->precision . ')' : '');
+
+        return 'timestamp_tz'.($column->precision ? '('.$column->precision.')' : '');
     }
 
     /**
      * Create the column definition for a timestamp type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeTimestamp(Fluent $column): string // Add return type hint
     {
         // TIMESTAMP_NTZ is generally equivalent
-        return 'timestamp_ntz' . ($column->precision ? '(' . $column->precision . ')' : '');
+        return 'timestamp_ntz'.($column->precision ? '('.$column->precision.')' : '');
     }
 
     /**
      * Create the column definition for a timestamp (with time zone) type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeTimestampTz(Fluent $column): string
     {
-        return 'timestamp_tz' . ($column->precision ? '(' . $column->precision . ')' : '');
+        return 'timestamp_tz'.($column->precision ? '('.$column->precision.')' : '');
     }
 
     /**
      * Create the column definition for a year type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeYear(Fluent $column): string
     {
@@ -856,9 +703,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a binary type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeBinary(Fluent $column): string
     {
@@ -867,9 +711,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a uuid type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeUuid(Fluent $column): string
     {
@@ -879,9 +720,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a ULID type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeUlid(Fluent $column): string
     {
@@ -891,9 +729,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for an IP address type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeIpAddress(Fluent $column): string
     {
@@ -903,9 +738,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a MAC address type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeMacAddress(Fluent $column): string
     {
@@ -915,9 +747,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a json type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeJson(Fluent $column): string // Add return type hint
     {
@@ -927,9 +756,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a jsonb type.
-     *
-     * @param \Illuminate\Support\Fluent $column
-     * @return string
      */
     protected function typeJsonb(Fluent $column): string // Add return type hint
     {
@@ -939,9 +765,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a geometry type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typeGeometry(Fluent $column): string
     {
@@ -950,9 +773,6 @@ class SchemaGrammar extends Grammar
 
     /**
      * Create the column definition for a point type.
-     *
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string
      */
     protected function typePoint(Fluent $column): string
     {
@@ -967,22 +787,23 @@ class SchemaGrammar extends Grammar
         if (is_array($value)) {
             return implode(', ', array_map([$this, 'quoteString'], $value));
         }
+
         // Use single quotes for SQL string literals
-        return "'" . str_replace("'", "''", $value) . "'";
+        return "'".str_replace("'", "''", $value)."'";
     }
 
     /**
      * Compile the query to determine if a table exists.
      *
-     * @param string|null $schema
-     * @param string $table
-     * @return string
+     * @param  string|null  $schema
+     * @param  string  $table
      */
     public function compileTableExists($schema, $table): string // Re-added method with correct signature
     {
-        $schema = $schema ?? $this->connection->getConfig("schema");
+        $schema = $schema ?? $this->connection->getConfig('schema');
+
         return $this->compileSelectExists(
-            "select * from information_schema.tables where table_schema = ? and table_name = ?",
+            'select * from information_schema.tables where table_schema = ? and table_name = ?',
             $schema, $table
         );
     }

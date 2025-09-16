@@ -1,17 +1,17 @@
 <?php
+
 namespace LaravelSnowflakeApi\Flavours\Snowflake\Grammars;
 
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Expression;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Query\Grammars\Grammar;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\ColumnDefinition;
-use LaravelSnowflakeApi\Traits\DebugLogging;
 use Illuminate\Support\Arr;
-use Illuminate\Database\Connection;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use LaravelSnowflakeApi\Traits\DebugLogging;
 
 class QueryGrammar extends Grammar
 {
@@ -35,7 +35,6 @@ class QueryGrammar extends Grammar
     /**
      * Create a new query grammar instance.
      *
-     * @param \Illuminate\Database\Connection|null $connection
      * @return void
      */
     public function __construct(?Connection $connection = null)
@@ -51,7 +50,6 @@ class QueryGrammar extends Grammar
     /**
      * Set the connection instance.
      *
-     * @param  \Illuminate\Database\Connection  $connection
      * @return $this
      */
     public function setConnection(Connection $connection)
@@ -93,15 +91,12 @@ class QueryGrammar extends Grammar
         '<', '<=', '>', '>=',
         'like', 'not like',
         'ilike',
-        '&' , '|', '^', // Bitwise operators if supported
+        '&', '|', '^', // Bitwise operators if supported
         // Add other Snowflake operators like RLIKE, REGEXP, etc. if needed
     ];
 
     /**
      * Compile a select query into SQL.
-     *
-     * @param \Illuminate\Database\Query\Builder $query
-     * @return string
      */
     public function compileSelect(Builder $query): string
     {
@@ -109,10 +104,11 @@ class QueryGrammar extends Grammar
         $sql = parent::compileSelect($query);
 
         if ($query->unions) {
-             $sql = $this->wrapUnion($sql) . ' ' . $this->compileUnions($query);
+            $sql = $this->wrapUnion($sql).' '.$this->compileUnions($query);
         }
 
         $this->debugLog('Compiled Select', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
+
         return $sql;
     }
 
@@ -124,23 +120,24 @@ class QueryGrammar extends Grammar
     public function columnize(array $columns)
     {
         $this->debugLog('columnize', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
+
         return implode(', ', array_map([$this, 'wrapColumn'], $columns));
     }
 
     /**
      * Wrap a table in keyword identifiers.
      *
-     * @param \Illuminate\Database\Query\Expression|string $table
-     * @param string|null $prefix
-     * @return string
+     * @param  \Illuminate\Database\Query\Expression|string  $table
+     * @param  string|null  $prefix
      */
     public function wrapTable($table, $prefix = null): string
     {
         $this->debugLog('wrapTable', ['table' => $table, 'file' => __FILE__, 'line' => __LINE__]);
-        if (method_exists($this, 'isExpression') && !$this->isExpression($table)) {
+        if (method_exists($this, 'isExpression') && ! $this->isExpression($table)) {
             $tableName = $this->resolveTableName($table);
-            $prefixedTableName = ($prefix ?? $this->tablePrefix) . $tableName;
+            $prefixedTableName = ($prefix ?? $this->tablePrefix).$tableName;
             $this->debugLog('wrapTable', ['resolved_table' => $tableName, 'prefixed_table' => $prefixedTableName, 'file' => __FILE__, 'line' => __LINE__]);
+
             return $this->wrap($prefixedTableName, true);
         }
 
@@ -150,8 +147,7 @@ class QueryGrammar extends Grammar
     /**
      * Resolve the table name considering potential Blueprint instance and case sensitivity.
      *
-     * @param mixed $table
-     * @return string
+     * @param  mixed  $table
      */
     protected function resolveTableName($table): string
     {
@@ -172,8 +168,7 @@ class QueryGrammar extends Grammar
     /**
      * Get the value of a raw expression.
      *
-     * @param \Illuminate\Database\Query\Expression $expression
-     *
+     * @param  \Illuminate\Database\Query\Expression  $expression
      * @return string
      */
     public function getValue($expression)
@@ -181,21 +176,22 @@ class QueryGrammar extends Grammar
         $this->debugLog('getValue', ['expression_type' => get_class($expression), 'file' => __FILE__, 'line' => __LINE__]);
         $return = $expression->getValue($this);
         $this->debugLog('display Return', ['return' => $return, 'file' => __FILE__, 'line' => __LINE__]);
+
         return $return;
     }
 
     /**
      * Wrap the given value segments.
      *
-     * @param array $segments
-     *
+     * @param  array  $segments
      * @return string
      */
     protected function wrapSegments($segments)
     {
         $this->debugLog('wrapSegments', ['segments' => $segments, 'file' => __FILE__, 'line' => __LINE__]);
+
         return collect($segments)->map(function ($segment, $key) use ($segments) {
-            return 0 === $key && count($segments) > 1
+            return $key === 0 && count($segments) > 1
                 ? $this->wrapTable($segment)
                 : $this->wrapColumn($segment);
         })->implode('.');
@@ -204,8 +200,7 @@ class QueryGrammar extends Grammar
     /**
      * Wrap a single string in keyword identifiers.
      *
-     * @param string | \Illuminate\Database\Query\Expression $column
-     *
+     * @param  string | \Illuminate\Database\Query\Expression  $column
      * @return string
      */
     protected function wrapColumn($column)
@@ -219,7 +214,7 @@ class QueryGrammar extends Grammar
             $column = $column->get('name');
         }
 
-        if ('*' !== $column) {
+        if ($column !== '*') {
             return str_replace('"', '', $column);
         }
 
@@ -229,14 +224,13 @@ class QueryGrammar extends Grammar
     /**
      * Wrap a single string in keypublic function wrapTable($table)word identifiers.
      *
-     * @param string $value
-     *
+     * @param  string  $value
      * @return string
      */
     protected function wrapValue($value)
     {
         $this->debugLog('wrapValue', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
-        if ('*' !== $value) {
+        if ($value !== '*') {
             return "'".str_replace("'", "''", $value)."'";
         }
 
@@ -246,39 +240,36 @@ class QueryGrammar extends Grammar
     /**
      * Compile the "limit" portions of the query.
      *
-     * @param \Illuminate\Database\Query\Builder $query
-     * @param int $limit
-     * @return string
+     * @param  int  $limit
      */
     protected function compileLimit(Builder $query, $limit): string
     {
         $this->debugLog('compileLimit', ['limit' => $limit, 'file' => __FILE__, 'line' => __LINE__]);
-        return 'limit ' . (int) $limit;
+
+        return 'limit '.(int) $limit;
     }
 
     /**
      * Compile the "offset" portions of the query.
      *
-     * @param \Illuminate\Database\Query\Builder $query
-     * @param int $offset
-     * @return string
+     * @param  int  $offset
      */
     protected function compileOffset(Builder $query, $offset): string
     {
         $this->debugLog('compileOffset', ['offset' => $offset, 'file' => __FILE__, 'line' => __LINE__]);
-        return 'offset ' . (int) $offset;
+
+        return 'offset '.(int) $offset;
     }
 
     /**
      * Compile the lock into SQL.
      *
-     * @param \Illuminate\Database\Query\Builder $query
-     * @param bool|string $value
-     * @return string
+     * @param  bool|string  $value
      */
     protected function compileLock(Builder $query, $value): string
     {
         $this->debugLog('compileLock (ignored for Snowflake)', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
+
         // Snowflake typically doesn't use SELECT ... FOR UPDATE/SHARE.
         // Locking is usually managed implicitly by transaction isolation levels.
         return '';
@@ -287,105 +278,103 @@ class QueryGrammar extends Grammar
     /**
      * Wrap a union subquery in parentheses.
      *
-     * @param string $sql
-     *
+     * @param  string  $sql
      * @return string
      */
     protected function wrapUnion($sql)
     {
         $this->debugLog('wrapUnion', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
+
         return 'select * from ('.$sql.')';
     }
 
     /**
      * Compile an insert statement into SQL.
-     *
-     * @param \Illuminate\Database\Query\Builder $query
-     * @param array $values
-     * @return string
      */
     public function compileInsert(Builder $query, array $values): string
     {
         $this->debugLog('compileInsert', ['values_count' => count($values), 'file' => __FILE__, 'line' => __LINE__]);
-        
+
         $table = $this->wrapTable($query->from);
-        
+
         if (empty($values)) {
             return "insert into {$table} default values";
         }
-        
+
         // Get the first value to analyze structure
         $firstRow = reset($values);
-        
+
         // Determine column names based on available information
         $columns = $this->determineInsertColumns($query, $firstRow);
-        
+
         // Format the columns for SQL
         $formattedColumns = $this->columnize($columns);
-        
+
         // Begin the SQL statement
         $sql = "insert into {$table} ({$formattedColumns}) values ";
-        
+
         // Get the values part
         $sqlValues = [];
         foreach ($values as $record) {
             $sqlValues[] = $this->formatInsertValues($record, $columns);
         }
-        
-        $finalSql = $sql . implode(', ', $sqlValues);
+
+        $finalSql = $sql.implode(', ', $sqlValues);
         $this->debugLog('Final SQL insert statement', ['sql' => $finalSql, 'file' => __FILE__, 'line' => __LINE__]);
+
         return $finalSql;
     }
-    
+
     /**
      * Determine the column names for an insert query
      *
-     * @param  \Illuminate\Database\Query\Builder  $query
      * @param  array|mixed  $firstRow
      * @return array
      */
     protected function determineInsertColumns(Builder $query, $firstRow)
     {
         // Priority 1: Use columns explicitly set on the query builder
-        if (isset($query->columns) && !empty($query->columns)) {
+        if (isset($query->columns) && ! empty($query->columns)) {
             $this->debugLog('Using columns from query builder', ['columns' => $query->columns, 'file' => __FILE__, 'line' => __LINE__]);
+
             return $query->columns;
         }
-        
+
         // If the first row isn't an array, just use a default column name
-        if (!is_array($firstRow)) {
+        if (! is_array($firstRow)) {
             return ['value'];
         }
-        
+
         // Check if array keys are numeric (positional) or named
         $keys = array_keys($firstRow);
         $allNumeric = $this->hasOnlyNumericKeys($keys);
-        
+
         if ($allNumeric) {
             // For numeric keys with no columns provided, use generic column names
             $this->debugLog('Creating placeholder column names for numeric keys', ['file' => __FILE__, 'line' => __LINE__]);
-            return array_map(function($i) {
+
+            return array_map(function ($i) {
                 return "col_$i";
             }, $keys);
         }
-        
+
         // For associative arrays, use the keys as column names
         $this->debugLog('Using associative keys as column names', ['keys' => $keys, 'file' => __FILE__, 'line' => __LINE__]);
+
         return $keys;
     }
-    
+
     /**
      * Format values for an insert statement
      *
      * @param  array|mixed  $record
-     * @param  array  $columns
      * @return string
      */
     protected function formatInsertValues($record, array $columns)
     {
         // If not an array, just return a single value
-        if (!is_array($record)) {
-            return '(' . $this->parameter($record) . ')';
+        if (! is_array($record)) {
+            return '('.$this->parameter($record).')';
         }
 
         $values = [];
@@ -406,22 +395,22 @@ class QueryGrammar extends Grammar
             }
         }
 
-        return '(' . implode(', ', $values) . ')';
+        return '('.implode(', ', $values).')';
     }
-    
+
     /**
      * Check if an array has only numeric keys
      *
-     * @param  array  $keys
      * @return bool
      */
     protected function hasOnlyNumericKeys(array $keys)
     {
         foreach ($keys as $key) {
-            if (!is_numeric($key)) {
+            if (! is_numeric($key)) {
                 return false;
             }
         }
+
         return true;
     }
 
@@ -430,7 +419,6 @@ class QueryGrammar extends Grammar
      *
      * @param  mixed  $value
      * @param  array  $context  Optional context with column information
-     * @return string
      */
     public function parameter($value, array $context = []): string
     {
@@ -448,16 +436,16 @@ class QueryGrammar extends Grammar
 
         // If this column should be forced to string, always quote it
         if ($columnName && in_array(strtolower($columnName), array_map('strtolower', array_map('trim', $forceStringColumns)))) {
-            return "'" . str_replace("'", "''", (string) $value) . "'";
+            return "'".str_replace("'", "''", (string) $value)."'";
         }
 
         // Check if we should treat numeric strings as strings
         // When SNOWFLAKE_QUOTE_NUMERIC_STRINGS is true, numeric strings will be quoted
         if (is_string($value) && is_numeric($value) && env('SNOWFLAKE_QUOTE_NUMERIC_STRINGS', false)) {
-            return "'" . str_replace("'", "''", $value) . "'";
+            return "'".str_replace("'", "''", $value)."'";
         }
 
-        if (is_numeric($value) && !is_string($value)) {
+        if (is_numeric($value) && ! is_string($value)) {
             // Only unquote actual numeric types (int, float), not numeric strings
             return (string) $value;
         }
@@ -466,24 +454,21 @@ class QueryGrammar extends Grammar
             return $this->getValue($value);
         }
 
-        return "'" . str_replace("'", "''", (string) $value) . "'";
+        return "'".str_replace("'", "''", (string) $value)."'";
     }
 
     /**
      * Compile an insert statement using columns and values into SQL.
      * Added for compatibility / potential use by Connection::insertWithColumns
      *
-     * @param \Illuminate\Database\Query\Builder $query
-     * @param array $columns
-     * @param array $values Multi-dimensional array of rows
-     * @return string
+     * @param  array  $values  Multi-dimensional array of rows
      */
     public function compileInsertWithColumns(Builder $query, array $columns, array $values): string
     {
         $this->debugLog('compileInsertWithColumns', [
             'columns' => $columns,
             'values_count' => count($values),
-            'file' => __FILE__, 'line' => __LINE__
+            'file' => __FILE__, 'line' => __LINE__,
         ]);
 
         $table = $this->wrapTable($query->from);
@@ -506,6 +491,7 @@ class QueryGrammar extends Grammar
 
         $sql = "insert into {$table} ({$formattedColumns}) values {$parameters}";
         $this->debugLog('Compiled SQL insert statement with columns', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
+
         return $sql;
     }
 
@@ -513,14 +499,13 @@ class QueryGrammar extends Grammar
      * Compile an insert ignore statement into SQL.
      *
      * @param  \\Illuminate\\Database\\Query\\Builder  $query
-     * @param  array  $values
-     * @return string
      */
     public function compileInsertOrIgnore(Builder $query, array $values): string
     {
         // Snowflake uses standard INSERT. Duplicate checks would need
         // to be handled via constraints or pre-checks.
         $this->debugLog('compileInsertOrIgnore (using standard INSERT)', ['file' => __FILE__, 'line' => __LINE__]);
+
         return $this->compileInsert($query, $values);
     }
 
@@ -528,10 +513,6 @@ class QueryGrammar extends Grammar
      * Compile an "upsert" statement into SQL.
      *
      * @param  \\Illuminate\\Database\\Query\\Builder  $query
-     * @param  array  $values
-     * @param  array  $uniqueBy
-     * @param  array  $update
-     * @return string
      */
     public function compileUpsert(Builder $query, array $values, array $uniqueBy, array $update): string
     {
@@ -549,7 +530,7 @@ class QueryGrammar extends Grammar
         $columns = $this->columnize(array_keys($firstRow));
 
         $parameters = collect($values)->map(function ($record) {
-            return '(' . $this->parameter($record) . ')';
+            return '('.$this->parameter($record).')';
         })->implode(', ');
 
         // Create a temporary alias for the source data
@@ -562,6 +543,7 @@ class QueryGrammar extends Grammar
         // Build the ON condition for the MERGE
         $onCondition = collect($uniqueBy)->map(function ($key) use ($table, $sourceAlias) {
             $wrappedKey = $this->wrap($key);
+
             return "{$table}.{$wrappedKey} = {$sourceAlias}.{$wrappedKey}";
         })->implode(' AND ');
 
@@ -570,6 +552,7 @@ class QueryGrammar extends Grammar
             $wrappedKey = $this->wrap($key);
             // If value is not an Expression, use the source value
             $updateValue = $this->isExpression($value) ? $this->getValue($value) : "{$sourceAlias}.{$wrappedKey}";
+
             return "{$table}.{$wrappedKey} = {$updateValue}";
         })->implode(', ');
 
@@ -584,6 +567,7 @@ class QueryGrammar extends Grammar
         $sql .= " when not matched then insert ({$insertColumns}) values ({$insertValues})";
 
         $this->debugLog('Compiled MERGE statement', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
+
         return $sql;
     }
 
@@ -591,8 +575,6 @@ class QueryGrammar extends Grammar
      * Compile an update statement into SQL.
      *
      * @param  \\Illuminate\\Database\\Query\\Builder  $query
-     * @param  array  $values
-     * @return string
      */
     public function compileUpdate(Builder $query, array $values): string
     {
@@ -604,7 +586,6 @@ class QueryGrammar extends Grammar
      * Compile a delete statement into SQL.
      *
      * @param  \\Illuminate\\Database\\Query\\Builder  $query
-     * @return string
      */
     public function compileDelete(Builder $query): string
     {
@@ -616,18 +597,16 @@ class QueryGrammar extends Grammar
      * Compile a truncate table statement into SQL.
      *
      * @param  \\Illuminate\\Database\\Query\\Builder  $query
-     * @return array
      */
     public function compileTruncate(Builder $query): array
     {
         $table = $this->wrapTable($query->from);
+
         return ["truncate table {$table}" => []];
     }
 
     /**
      * Get the format for database stored dates.
-     *
-     * @return string
      */
     public function getDateFormat(): string
     {
@@ -637,10 +616,6 @@ class QueryGrammar extends Grammar
 
     /**
      * Prepare the bindings for an update statement.
-     *
-     * @param array $bindings
-     * @param array $values
-     * @return array
      */
     public function prepareBindingsForUpdate(array $bindings, array $values): array
     {
@@ -648,6 +623,7 @@ class QueryGrammar extends Grammar
         // This method might not be directly used if the Connection class builds the full SQL.
         // However, if bindings were to be used, they would be merged here.
         $this->debugLog('prepareBindingsForUpdate (potentially unused)', ['bindings' => $bindings, 'values' => $values]);
+
         return parent::prepareBindingsForUpdate($bindings, $values);
     }
 
@@ -655,8 +631,7 @@ class QueryGrammar extends Grammar
      * Quote the given string literal.
      * This is primarily for string values.
      *
-     * @param string|array $value
-     * @return string
+     * @param  string|array  $value
      */
     public function quoteString($value): string
     {
@@ -665,15 +640,14 @@ class QueryGrammar extends Grammar
         }
 
         // Basic single quote escaping for SQL strings
-        return "'" . str_replace("'", "''", (string) $value) . "'";
+        return "'".str_replace("'", "''", (string) $value)."'";
     }
 
     /**
      * Process columns in SQL for handling special characters and quotes.
      * This method is used primarily for testing PIVOT column handling.
      *
-     * @param string $sql
-     * @return string
+     * @param  string  $sql
      */
     public function processColumns($sql): string
     {
