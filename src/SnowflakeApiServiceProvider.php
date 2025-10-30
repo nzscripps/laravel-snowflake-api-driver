@@ -41,5 +41,65 @@ class SnowflakeApiServiceProvider extends ServiceProvider
     {
         Model::setConnectionResolver($this->app['db']);
         Model::setEventDispatcher($this->app['events']);
+
+        // Validate cache driver configuration for thread-safe token management
+        $this->validateCacheDriver();
+    }
+
+    /**
+     * Validate cache driver supports required features
+     *
+     * This method warns if the configured cache driver doesn't support
+     * atomic locks, which are required for optimal thread-safe token management.
+     *
+     * Supported drivers with atomic locks:
+     * - redis (recommended for production)
+     * - memcached (acceptable for production)
+     * - database (works but may be slow for high-concurrency)
+     *
+     * Unsupported drivers (will fall back to non-atomic generation):
+     * - file (not safe for distributed systems)
+     * - array (testing only)
+     *
+     * @return void
+     */
+    private function validateCacheDriver(): void
+    {
+        try {
+            $driver = config('cache.default', 'array');
+            $isDebug = config('app.debug', false);
+        } catch (\Exception $e) {
+            // Config not available, skip validation
+            return;
+        }
+
+        // List of drivers known to support atomic locks
+        $supportedDrivers = ['redis', 'memcached', 'database', 'dynamodb'];
+
+        // List of drivers not recommended for production
+        $unsafeDrivers = ['file', 'array', 'null'];
+
+        if (in_array($driver, $unsafeDrivers)) {
+            \Illuminate\Support\Facades\Log::warning(
+                'Snowflake API Driver: Cache driver does not support atomic locks',
+                [
+                    'current_driver' => $driver,
+                    'recommended_drivers' => ['redis', 'memcached'],
+                    'impact' => 'Token generation may not be atomic under high concurrency',
+                    'mitigation' => 'The driver will fall back to non-atomic generation',
+                ]
+            );
+        }
+
+        // Log current cache configuration for debugging
+        if ($isDebug) {
+            \Illuminate\Support\Facades\Log::debug(
+                'Snowflake API Driver: Cache driver configuration',
+                [
+                    'driver' => $driver,
+                    'supports_locks' => in_array($driver, $supportedDrivers),
+                ]
+            );
+        }
     }
 }
