@@ -194,22 +194,18 @@ class SnowflakeApiConnection extends Connection
                     'array_count' => count($array),
                 ]);
 
-                // Check fetch mode from config
-                // Default to FETCH_OBJ for Laravel compatibility, but allow FETCH_ASSOC for legacy code
-                $fetchMode = $this->config['fetch'] ?? $this->config['fetch_mode'] ?? PDO::FETCH_OBJ;
+                // Always return CaseInsensitiveRow objects for Laravel compatibility.
+                // Snowflake returns UPPERCASE keys but controllers use mixed-case
+                // property names (Order_Number, order_number, etc.).
+                // CaseInsensitiveRow resolves any casing via __get magic method.
+                //
+                // To get raw associative arrays instead, use:
+                //   DB::connection('snowflake_api')->select(...) and call ->toArray() on each row
+                $objects = array_map(function ($row) {
+                    return new \LaravelSnowflakeApi\Services\CaseInsensitiveRow($row);
+                }, $array);
 
-                if ($fetchMode === PDO::FETCH_ASSOC || $fetchMode === 'FETCH_ASSOC' || $fetchMode === 'array') {
-                    // Return as associative arrays
-                    return $array;
-                } else {
-                    // Convert arrays to objects for Laravel compatibility
-                    // Laravel's query builder expects objects (stdClass) not arrays
-                    $objects = array_map(function ($row) {
-                        return (object) $row;
-                    }, $array);
-
-                    return $objects;
-                }
+                return $objects;
             } catch (Exception $e) {
                 Log::error('SnowflakeApiConnection: Error executing select query', [
                     'query' => $statement ?? $query,
