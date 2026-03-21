@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\SchemaGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Processor as SnowflakeProcessor;
+use LaravelSnowflakeApi\Flavours\Snowflake\SnowflakeQueryBuilder;
 use LaravelSnowflakeApi\Services\SnowflakeService;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 use PDO;
@@ -149,6 +150,19 @@ class SnowflakeApiConnection extends Connection
         $this->debugLog('SnowflakeApiConnection: Getting default post processor');
 
         return new SnowflakeProcessor;
+    }
+
+    /**
+     * Get a new query builder instance.
+     *
+     * Returns a SnowflakeQueryBuilder that properly handles exists() and
+     * aggregate() with CaseInsensitiveRow results.
+     */
+    public function query()
+    {
+        return new SnowflakeQueryBuilder(
+            $this, $this->getQueryGrammar(), $this->getPostProcessor()
+        );
     }
 
     /**

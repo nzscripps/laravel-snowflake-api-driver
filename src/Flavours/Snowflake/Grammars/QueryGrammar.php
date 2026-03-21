@@ -97,6 +97,20 @@ class QueryGrammar extends Grammar
     ];
 
     /**
+     * Compile an exists statement into SQL.
+     *
+     * Snowflake treats EXISTS as a reserved keyword and rejects it as a column
+     * alias. Use double-quoted "exists" to force Snowflake to treat it as an
+     * identifier rather than parsing it as the reserved keyword.
+     */
+    public function compileExists(Builder $query): string
+    {
+        $select = $this->compileSelect($query);
+
+        return "select exists({$select}) as \"exists\"";
+    }
+
+    /**
      * Compile a select query into SQL.
      *
      * @param \Illuminate\Database\Query\Builder $query
