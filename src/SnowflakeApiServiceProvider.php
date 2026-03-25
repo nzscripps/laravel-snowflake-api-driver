@@ -67,16 +67,10 @@ class SnowflakeApiServiceProvider extends ServiceProvider
     {
         try {
             $driver = config('cache.default', 'array');
-            $isDebug = config('app.debug', false);
         } catch (\Exception $e) {
-            // Config not available, skip validation
             return;
         }
 
-        // List of drivers known to support atomic locks
-        $supportedDrivers = ['redis', 'memcached', 'database', 'dynamodb'];
-
-        // List of drivers not recommended for production
         $unsafeDrivers = ['file', 'array', 'null'];
 
         if (in_array($driver, $unsafeDrivers)) {
@@ -87,17 +81,6 @@ class SnowflakeApiServiceProvider extends ServiceProvider
                     'recommended_drivers' => ['redis', 'memcached'],
                     'impact' => 'Token generation may not be atomic under high concurrency',
                     'mitigation' => 'The driver will fall back to non-atomic generation',
-                ]
-            );
-        }
-
-        // Log current cache configuration for debugging
-        if ($isDebug) {
-            \Illuminate\Support\Facades\Log::debug(
-                'Snowflake API Driver: Cache driver configuration',
-                [
-                    'driver' => $driver,
-                    'supports_locks' => in_array($driver, $supportedDrivers),
                 ]
             );
         }
