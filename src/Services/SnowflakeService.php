@@ -80,6 +80,7 @@ class SnowflakeService
      * @param  string  $database  The Snowflake database to use
      * @param  string  $schema  The Snowflake schema to use
      * @param  int  $timeout  Timeout in seconds for query execution
+     * @param  string|null  $cacheDriver  The Laravel cache store to use for Snowflake tokens
      */
     public function __construct(
         string $baseUrl,
@@ -91,7 +92,8 @@ class SnowflakeService
         string $warehouse,
         string $database,
         string $schema,
-        int $timeout
+        int $timeout,
+        ?string $cacheDriver = null
     ) {
         $this->config = new SnowflakeConfig(
             $baseUrl,
@@ -103,7 +105,8 @@ class SnowflakeService
             $warehouse,
             $database,
             $schema,
-            $timeout
+            $timeout,
+            $cacheDriver
         );
 
         // Initialize thread-safe token provider
@@ -122,6 +125,7 @@ class SnowflakeService
             'database' => $this->config->getDatabase(),
             'schema' => $this->config->getSchema(),
             'timeout' => $this->config->getTimeout(),
+            'cache_driver' => $this->config->getCacheDriver(),
             'has_privateKey' => ! empty($this->config->getPrivateKey()),
             'has_publicKey' => ! empty($this->config->getPublicKey()),
             'has_passphrase' => ! empty($this->config->getPrivateKeyPassphrase()),

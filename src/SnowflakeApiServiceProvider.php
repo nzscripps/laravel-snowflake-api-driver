@@ -60,29 +60,37 @@ class SnowflakeApiServiceProvider extends ServiceProvider
      * Unsupported drivers (will fall back to non-atomic generation):
      * - file (not safe for distributed systems)
      * - array (testing only)
-     *
-     * @return void
      */
     private function validateCacheDriver(): void
     {
         try {
-            $driver = config('cache.default', 'array');
+            $connections = config('database.connections', []);
+            $defaultDriver = config('cache.default', 'array');
         } catch (\Exception $e) {
             return;
         }
 
         $unsafeDrivers = ['file', 'array', 'null'];
+        $snowflakeConnections = array_filter(
+            $connections,
+            static fn ($connection) => ($connection['driver'] ?? null) === 'snowflake_api'
+        );
 
-        if (in_array($driver, $unsafeDrivers)) {
-            \Illuminate\Support\Facades\Log::warning(
-                'Snowflake API Driver: Cache driver does not support atomic locks',
-                [
-                    'current_driver' => $driver,
-                    'recommended_drivers' => ['redis', 'memcached'],
-                    'impact' => 'Token generation may not be atomic under high concurrency',
-                    'mitigation' => 'The driver will fall back to non-atomic generation',
-                ]
-            );
+        foreach ($snowflakeConnections as $name => $connection) {
+            $driver = $connection['cache_driver'] ?? $defaultDriver;
+
+            if (in_array($driver, $unsafeDrivers, true)) {
+                \Illuminate\Support\Facades\Log::warning(
+                    'Snowflake API Driver: Cache driver does not support atomic locks',
+                    [
+                        'connection' => $name,
+                        'current_driver' => $driver,
+                        'recommended_drivers' => ['redis', 'memcached'],
+                        'impact' => 'Token generation may not be atomic under high concurrency',
+                        'mitigation' => 'The driver will fall back to non-atomic generation',
+                    ]
+                );
+            }
         }
     }
 }

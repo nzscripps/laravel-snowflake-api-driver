@@ -28,6 +28,7 @@ Add the following configuration to your `config/database.php` file:
         'database' => env('SNOWFLAKE_DATABASE'),
         'schema' => env('SNOWFLAKE_SCHEMA'),
         'timeout' => env('SNOWFLAKE_TIMEOUT', 30),
+        'cache_driver' => env('SNOWFLAKE_CACHE_DRIVER'),
     ],
 ],
 ```
@@ -45,8 +46,11 @@ SNOWFLAKE_WAREHOUSE=your-snowflake-warehouse
 SNOWFLAKE_DATABASE=your-snowflake-database
 SNOWFLAKE_SCHEMA=your-snowflake-schema
 SNOWFLAKE_TIMEOUT=30
+SNOWFLAKE_CACHE_DRIVER=redis
 SNOWFLAKE_COLUMNS_CASE_SENSITIVE=false
 ```
+
+`cache_driver` is optional. When set, Snowflake token caching and lock coordination use that Laravel cache store instead of the app-wide `cache.default`.
 
 ## Usage
 

@@ -5,9 +5,7 @@ declare(strict_types=1);
 namespace LaravelSnowflakeApi\Services;
 
 use Exception;
-use Illuminate\Cache\CacheManager;
 use Illuminate\Contracts\Cache\LockTimeoutException;
-use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Jose\Component\Core\AlgorithmManager;
@@ -79,22 +77,22 @@ class ThreadSafeTokenProvider
     private int $lockRetryInterval;
 
     /**
-     * Whether cache driver validation has been performed
+     * Cache driver validation status keyed by cache store name
      */
-    private static bool $driverValidated = false;
+    private static array $driverValidated = [];
 
     /**
-     * Whether cache driver supports atomic locks
+     * Cache driver lock support keyed by cache store name
      */
-    private static bool $driverSupportsLocks = false;
+    private static array $driverSupportsLocks = [];
 
     /**
      * Initialize thread-safe token provider
      *
-     * @param SnowflakeConfig $config Snowflake configuration
-     * @param int $expiryBuffer Token expiry buffer in seconds (default: 60)
-     * @param int $lockTimeout Lock acquisition timeout in seconds (default: 5)
-     * @param int $lockRetryInterval Lock retry interval in milliseconds (default: 100)
+     * @param  SnowflakeConfig  $config  Snowflake configuration
+     * @param  int  $expiryBuffer  Token expiry buffer in seconds (default: 60)
+     * @param  int  $lockTimeout  Lock acquisition timeout in seconds (default: 5)
+     * @param  int  $lockRetryInterval  Lock retry interval in milliseconds (default: 100)
      *
      * @throws SnowflakeApiException If cache driver doesn't support locks
      */
@@ -109,10 +107,12 @@ class ThreadSafeTokenProvider
         $this->lockTimeout = $lockTimeout;
         $this->lockRetryInterval = $lockRetryInterval;
 
-        // Validate cache driver once per process
-        if (! self::$driverValidated) {
-            $this->validateCacheDriver();
-            self::$driverValidated = true;
+        $cacheDriver = $this->getCacheDriver();
+
+        // Validate each cache store once per process.
+        if (! array_key_exists($cacheDriver, self::$driverValidated)) {
+            self::$driverSupportsLocks[$cacheDriver] = $this->validateCacheDriver($cacheDriver);
+            self::$driverValidated[$cacheDriver] = true;
         }
     }
 
@@ -140,6 +140,7 @@ class ThreadSafeTokenProvider
         $staticToken = $this->getFromStaticCache();
         if ($staticToken !== null) {
             $this->debugLog('ThreadSafeTokenProvider: Token retrieved from static cache');
+
             return $staticToken;
         }
 
@@ -148,6 +149,7 @@ class ThreadSafeTokenProvider
         if ($laravelToken !== null) {
             $this->debugLog('ThreadSafeTokenProvider: Token retrieved from Laravel cache');
             $this->updateStaticCache($laravelToken);
+
             return $laravelToken;
         }
 
@@ -158,7 +160,7 @@ class ThreadSafeTokenProvider
     /**
      * Validate the expiry buffer configuration
      *
-     * @param int $expiryBuffer Expiry buffer in seconds
+     * @param  int  $expiryBuffer  Expiry buffer in seconds
      * @return int Validated expiry buffer
      *
      * @throws SnowflakeApiException If expiry buffer is invalid
@@ -187,15 +189,13 @@ class ThreadSafeTokenProvider
      * - Token is manually revoked
      * - User credentials change
      * - Security incident requires token rotation
-     *
-     * @return void
      */
     public function clearTokenCache(): void
     {
         $cacheKey = $this->getCacheKey();
 
-        // Clear Laravel cache
-        Cache::forget($cacheKey);
+        // Clear configured cache store
+        $this->cacheStore()->forget($cacheKey);
 
         // Clear static cache
         $staticKey = $this->getStaticCacheKey();
@@ -213,35 +213,26 @@ class ThreadSafeTokenProvider
      *
      * @throws SnowflakeApiException If cache driver doesn't support locks
      */
-    private function validateCacheDriver(): void
+    private function validateCacheDriver(string $driver): bool
     {
-        // Get cache driver safely (handle cases where Laravel isn't fully bootstrapped)
-        try {
-            $driver = function_exists('config') ? config('cache.default') : 'array';
-        } catch (Exception $e) {
-            $driver = 'array';
-        }
-
         $this->debugLog('ThreadSafeTokenProvider: Validating cache driver', [
             'driver' => $driver,
         ]);
 
         // Check if driver supports locks by attempting to create one
         try {
-            $testLock = Cache::lock('snowflake_test_lock_' . uniqid(), 1);
+            $testLock = $this->cacheStore()->lock('snowflake_test_lock_'.uniqid('', true), 1);
 
             // If lock() doesn't throw an exception, the driver supports locks
-            self::$driverSupportsLocks = true;
-
             // Clean up test lock
             $testLock->forceRelease();
 
             $this->debugLog('ThreadSafeTokenProvider: Cache driver supports atomic locks', [
                 'driver' => $driver,
             ]);
-        } catch (Exception $e) {
-            self::$driverSupportsLocks = false;
 
+            return true;
+        } catch (Exception $e) {
             // Log warning but don't fail - we'll fall back to non-atomic generation
             Log::warning('ThreadSafeTokenProvider: Cache driver does not support atomic locks', [
                 'driver' => $driver,
@@ -252,7 +243,35 @@ class ThreadSafeTokenProvider
             $this->debugLog('ThreadSafeTokenProvider: Cache driver validation failed, will use fallback', [
                 'driver' => $driver,
             ]);
+
+            return false;
         }
+    }
+
+    /**
+     * Get the effective cache driver for this Snowflake connection.
+     */
+    private function getCacheDriver(): string
+    {
+        $configuredDriver = $this->config->getCacheDriver();
+
+        if (is_string($configuredDriver) && $configuredDriver !== '' && $configuredDriver !== 'default') {
+            return $configuredDriver;
+        }
+
+        try {
+            return function_exists('config') ? (string) config('cache.default', 'array') : 'array';
+        } catch (Exception $e) {
+            return 'array';
+        }
+    }
+
+    /**
+     * Get the cache repository/store backing this provider.
+     */
+    private function cacheStore()
+    {
+        return Cache::store($this->getCacheDriver());
     }
 
     /**
@@ -317,12 +336,14 @@ class ThreadSafeTokenProvider
         // Validate structure
         if (! isset($cachedData['token'], $cachedData['expiry'])) {
             unset(self::$staticCache[$staticKey]);
+
             return null;
         }
 
         // Check expiry with buffer
         if (time() >= $cachedData['expiry'] - $this->expiryBuffer) {
             unset(self::$staticCache[$staticKey]);
+
             return null;
         }
 
@@ -332,12 +353,12 @@ class ThreadSafeTokenProvider
     /**
      * Get token from Laravel cache if valid
      *
-     * @param string $cacheKey Cache key
+     * @param  string  $cacheKey  Cache key
      * @return string|null Token if valid, null otherwise
      */
     private function getFromLaravelCache(string $cacheKey): ?string
     {
-        $cachedData = Cache::get($cacheKey);
+        $cachedData = $this->cacheStore()->get($cacheKey);
 
         if ($cachedData === null) {
             return null;
@@ -345,13 +366,15 @@ class ThreadSafeTokenProvider
 
         // Validate structure
         if (! is_array($cachedData) || ! isset($cachedData['token'], $cachedData['expiry'])) {
-            Cache::forget($cacheKey);
+            $this->cacheStore()->forget($cacheKey);
+
             return null;
         }
 
         // Check expiry with buffer
         if (time() >= $cachedData['expiry'] - $this->expiryBuffer) {
-            Cache::forget($cacheKey);
+            $this->cacheStore()->forget($cacheKey);
+
             return null;
         }
 
@@ -361,16 +384,15 @@ class ThreadSafeTokenProvider
     /**
      * Update static cache with token data
      *
-     * @param string $token Token to cache
-     * @return void
+     * @param  string  $token  Token to cache
      */
     private function updateStaticCache(string $token): void
     {
         $staticKey = $this->getStaticCacheKey();
         $cacheKey = $this->getCacheKey();
 
-        // Get expiry from Laravel cache
-        $cachedData = Cache::get($cacheKey);
+        // Get expiry from configured cache store
+        $cachedData = $this->cacheStore()->get($cacheKey);
         if ($cachedData !== null && isset($cachedData['expiry'])) {
             self::$staticCache[$staticKey] = [
                 'token' => $token,
@@ -389,8 +411,8 @@ class ThreadSafeTokenProvider
      * 4. Store in caches
      * 5. Release lock
      *
-     * @param string $cacheKey Cache key
-     * @param string $lockKey Lock key
+     * @param  string  $cacheKey  Cache key
+     * @param  string  $lockKey  Lock key
      * @return string Valid JWT access token
      *
      * @throws SnowflakeApiException If token generation fails
@@ -398,14 +420,15 @@ class ThreadSafeTokenProvider
     private function acquireLockAndGenerateToken(string $cacheKey, string $lockKey): string
     {
         // If driver doesn't support locks, fall back to direct generation
-        if (! self::$driverSupportsLocks) {
+        if (! (self::$driverSupportsLocks[$this->getCacheDriver()] ?? false)) {
             $this->debugLog('ThreadSafeTokenProvider: Lock not supported, generating token directly');
+
             return $this->generateAndCacheToken($cacheKey);
         }
 
         try {
             // Attempt to acquire lock with blocking
-            $lock = Cache::lock($lockKey, $this->lockTimeout);
+            $lock = $this->cacheStore()->lock($lockKey, $this->lockTimeout);
 
             $this->debugLog('ThreadSafeTokenProvider: Attempting to acquire lock', [
                 'lock_key' => $lockKey,
@@ -422,11 +445,13 @@ class ThreadSafeTokenProvider
                 if ($existingToken !== null) {
                     $this->debugLog('ThreadSafeTokenProvider: Token found in cache after lock acquisition');
                     $this->updateStaticCache($existingToken);
+
                     return $existingToken;
                 }
 
                 // Generate new token
                 $this->debugLog('ThreadSafeTokenProvider: Generating new token');
+
                 return $this->generateAndCacheToken($cacheKey);
             });
 
@@ -445,6 +470,7 @@ class ThreadSafeTokenProvider
             if ($existingToken !== null) {
                 $this->debugLog('ThreadSafeTokenProvider: Found token in cache after timeout');
                 $this->updateStaticCache($existingToken);
+
                 return $existingToken;
             }
 
@@ -473,7 +499,7 @@ class ThreadSafeTokenProvider
      * This method generates a new JWT token and stores it in both
      * static cache (in-process) and Laravel cache (cross-process)
      *
-     * @param string $cacheKey Cache key
+     * @param  string  $cacheKey  Cache key
      * @return string Valid JWT access token
      *
      * @throws SnowflakeApiException If token generation fails
@@ -494,7 +520,7 @@ class ThreadSafeTokenProvider
                 'token' => $token,
                 'expiry' => $expiryTime,
             ];
-            Cache::put($cacheKey, $cacheData, $cacheDuration);
+            $this->cacheStore()->put($cacheKey, $cacheData, $cacheDuration);
 
             // Store in static cache
             $staticKey = $this->getStaticCacheKey();
@@ -512,7 +538,7 @@ class ThreadSafeTokenProvider
         } catch (Exception $e) {
             $this->handleError($e, 'Error generating JWT token');
             throw new SnowflakeApiException(
-                'Failed to generate access token: ' . $e->getMessage(),
+                'Failed to generate access token: '.$e->getMessage(),
                 0,
                 $e
             );
@@ -563,7 +589,7 @@ class ThreadSafeTokenProvider
         );
 
         // Prepare JWT claims
-        $publicKeyFingerprint = 'SHA256:' . $this->config->getPublicKey();
+        $publicKeyFingerprint = 'SHA256:'.$this->config->getPublicKey();
         $expiresIn = time() + 3600; // 1 hour expiry
 
         $payload = [
@@ -609,10 +635,9 @@ class ThreadSafeTokenProvider
     /**
      * Handle and log errors consistently
      *
-     * @param Exception $e The exception to handle
-     * @param string $context Context information
-     * @param array $additionalData Additional data to log
-     * @return void
+     * @param  Exception  $e  The exception to handle
+     * @param  string  $context  Context information
+     * @param  array  $additionalData  Additional data to log
      */
     private function handleError(Exception $e, string $context, array $additionalData = []): void
     {
@@ -621,6 +646,6 @@ class ThreadSafeTokenProvider
             'context' => $context,
         ], $additionalData);
 
-        Log::error('ThreadSafeTokenProvider: ' . $context, $errorData);
+        Log::error('ThreadSafeTokenProvider: '.$context, $errorData);
     }
 }

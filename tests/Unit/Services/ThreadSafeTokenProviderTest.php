@@ -5,35 +5,35 @@ declare(strict_types=1);
 namespace Tests\Unit\Services;
 
 use Exception;
+use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use LaravelSnowflakeApi\Exceptions\SnowflakeApiException;
 use LaravelSnowflakeApi\Services\SnowflakeConfig;
 use LaravelSnowflakeApi\Services\ThreadSafeTokenProvider;
 use Mockery;
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 
 class ThreadSafeTokenProviderTest extends TestCase
 {
     private SnowflakeConfig $config;
 
+    private $cacheStore;
+
     protected function setUp(): void
     {
         parent::setUp();
 
+        Log::shouldReceive('warning')->byDefault();
+        Log::shouldReceive('error')->byDefault();
+        $this->cacheStore = Mockery::mock();
+        Cache::shouldReceive('store')->byDefault()->withAnyArgs()->andReturn($this->cacheStore);
+        $this->cacheStore->shouldReceive('lock')->byDefault()->withAnyArgs()->andThrow(new Exception('Lock not supported'));
+
         // Create mock config with test credentials
-        $this->config = new SnowflakeConfig(
-            'https://test.snowflakecomputing.com',
-            'test_account',
-            'test_user',
-            'test_public_key_fingerprint',
-            $this->getTestPrivateKey(),
-            '',
-            'test_warehouse',
-            'test_database',
-            'test_schema',
-            30
-        );
+        $this->resetProviderState();
+        $this->config = $this->makeConfig();
     }
 
     protected function tearDown(): void
@@ -42,14 +42,14 @@ class ThreadSafeTokenProviderTest extends TestCase
         parent::tearDown();
     }
 
-    public function testGetTokenFromStaticCache()
+    public function test_get_token_from_static_cache()
     {
         // This test verifies that static cache is checked first
         $provider = new ThreadSafeTokenProvider($this->config);
 
         // Mock Laravel cache to ensure it's not called
-        Cache::shouldReceive('get')->never();
-        Cache::shouldReceive('lock')->never();
+        $this->cacheStore->shouldReceive('get')->never();
+        $this->cacheStore->shouldReceive('lock')->never();
 
         // Pre-populate static cache using reflection
         $reflection = new \ReflectionClass($provider);
@@ -58,7 +58,7 @@ class ThreadSafeTokenProviderTest extends TestCase
 
         $staticKey = 'test_account:test_user';
         $testToken = 'static_cached_token.test.signature';
-        $staticCache->setValue([
+        $staticCache->setValue(null, [
             $staticKey => [
                 'token' => $testToken,
                 'expiry' => time() + 3600, // Valid for 1 hour
@@ -71,7 +71,7 @@ class ThreadSafeTokenProviderTest extends TestCase
         $this->assertEquals($testToken, $token);
     }
 
-    public function testGetTokenFromLaravelCache()
+    public function test_get_token_from_laravel_cache()
     {
         // This test verifies Laravel cache is checked when static cache misses
         $provider = new ThreadSafeTokenProvider($this->config);
@@ -84,8 +84,8 @@ class ThreadSafeTokenProviderTest extends TestCase
         ];
 
         // Mock cache to return token
-        Cache::shouldReceive('get')
-            ->once()
+        $this->cacheStore->shouldReceive('get')
+            ->twice()
             ->with($cacheKey)
             ->andReturn($cachedData);
 
@@ -95,23 +95,51 @@ class ThreadSafeTokenProviderTest extends TestCase
         $this->assertEquals($testToken, $token);
     }
 
-    public function testGetTokenGeneratesNewWhenCacheMisses()
+    public function test_uses_configured_cache_store_instead_of_global_default()
+    {
+        $cacheKey = 'snowflake_api_token:test_account:test_user';
+        $testToken = 'redis_cached_token.test.signature';
+
+        Cache::shouldReceive('store')
+            ->byDefault()
+            ->with('redis')
+            ->andReturn($this->cacheStore);
+        Cache::shouldReceive('store')
+            ->never()
+            ->with('file');
+        $provider = new ThreadSafeTokenProvider($this->makeConfig(cacheDriver: 'redis'));
+
+        $this->cacheStore->shouldReceive('get')
+            ->twice()
+            ->with($cacheKey)
+            ->andReturn([
+                'token' => $testToken,
+                'expiry' => time() + 3600,
+            ]);
+
+        $token = $provider->getToken();
+
+        $this->assertEquals($testToken, $token);
+    }
+
+    public function test_get_token_generates_new_when_cache_misses()
     {
         // This test verifies new token generation when all caches miss
         $provider = new ThreadSafeTokenProvider($this->config);
+        $this->setDriverLockSupport('array', true);
 
         $cacheKey = 'snowflake_api_token:test_account:test_user';
         $lockKey = 'snowflake_api_token_lock:test_account:test_user';
 
         // Mock cache miss
-        Cache::shouldReceive('get')
+        $this->cacheStore->shouldReceive('get')
             ->once()
             ->with($cacheKey)
             ->andReturn(null);
 
         // Mock lock acquisition (simulate lock not supported)
         $mockLock = Mockery::mock(\Illuminate\Contracts\Cache\Lock::class);
-        Cache::shouldReceive('lock')
+        $this->cacheStore->shouldReceive('lock')
             ->once()
             ->with($lockKey, 5)
             ->andReturn($mockLock);
@@ -121,11 +149,11 @@ class ThreadSafeTokenProviderTest extends TestCase
             ->andThrow(new Exception('Lock not supported'));
 
         // Mock cache operations for storing new token
-        Cache::shouldReceive('get')
+        $this->cacheStore->shouldReceive('get')
             ->with($cacheKey)
             ->andReturn(null);
 
-        Cache::shouldReceive('put')
+        $this->cacheStore->shouldReceive('put')
             ->once()
             ->withArgs(function ($key, $data, $duration) use ($cacheKey) {
                 return $key === $cacheKey
@@ -142,32 +170,34 @@ class ThreadSafeTokenProviderTest extends TestCase
         $this->assertStringContainsString('.', $token); // JWT format
     }
 
-    public function testLockTimeoutFallsBackToGeneration()
+    public function test_lock_timeout_falls_back_to_generation()
     {
         // This test verifies graceful fallback when lock times out
         $provider = new ThreadSafeTokenProvider($this->config);
+        $this->setDriverLockSupport('array', true);
 
         $cacheKey = 'snowflake_api_token:test_account:test_user';
         $lockKey = 'snowflake_api_token_lock:test_account:test_user';
 
         // Mock cache miss
-        Cache::shouldReceive('get')
+        $this->cacheStore->shouldReceive('get')
+            ->twice()
             ->with($cacheKey)
             ->andReturn(null);
 
         // Mock lock timeout
         $mockLock = Mockery::mock(\Illuminate\Contracts\Cache\Lock::class);
-        Cache::shouldReceive('lock')
+        $this->cacheStore->shouldReceive('lock')
             ->once()
             ->with($lockKey, 5)
             ->andReturn($mockLock);
 
         $mockLock->shouldReceive('block')
             ->once()
-            ->andThrow(new LockTimeoutException());
+            ->andThrow(new LockTimeoutException);
 
         // Mock cache operations for fallback generation
-        Cache::shouldReceive('put')
+        $this->cacheStore->shouldReceive('put')
             ->once()
             ->withArgs(function ($key, $data, $duration) use ($cacheKey) {
                 return $key === $cacheKey
@@ -181,24 +211,28 @@ class ThreadSafeTokenProviderTest extends TestCase
         $this->assertNotEmpty($token);
     }
 
-    public function testDoubleCheckedLockingPreventsRaceCondition()
+    public function test_double_checked_locking_prevents_race_condition()
     {
         // This test verifies that double-checked locking works correctly
         $provider = new ThreadSafeTokenProvider($this->config);
+        $this->setDriverLockSupport('array', true);
 
         $cacheKey = 'snowflake_api_token:test_account:test_user';
         $lockKey = 'snowflake_api_token_lock:test_account:test_user';
         $existingToken = 'existing_token.from.another_process';
+        $cachedData = [
+            'token' => $existingToken,
+            'expiry' => time() + 3600,
+        ];
 
-        // First cache check - miss
-        Cache::shouldReceive('get')
-            ->once()
+        $this->cacheStore->shouldReceive('get')
+            ->times(3)
             ->with($cacheKey)
-            ->andReturn(null);
+            ->andReturn(null, $cachedData, $cachedData);
 
         // Mock successful lock acquisition
         $mockLock = Mockery::mock(\Illuminate\Contracts\Cache\Lock::class);
-        Cache::shouldReceive('lock')
+        $this->cacheStore->shouldReceive('lock')
             ->once()
             ->with($lockKey, 5)
             ->andReturn($mockLock);
@@ -207,18 +241,7 @@ class ThreadSafeTokenProviderTest extends TestCase
         $mockLock->shouldReceive('block')
             ->once()
             ->with(5, Mockery::type('callable'))
-            ->andReturnUsing(function ($timeout, $callback) use ($cacheKey, $existingToken) {
-                // Simulate token appearing in cache during lock wait
-                Cache::shouldReceive('get')
-                    ->once()
-                    ->with($cacheKey)
-                    ->andReturn([
-                        'token' => $existingToken,
-                        'expiry' => time() + 3600,
-                    ]);
-
-                return $callback();
-            });
+            ->andReturnUsing(fn ($timeout, $callback) => $callback());
 
         // Get token - should return existing token, not generate new one
         $token = $provider->getToken();
@@ -226,7 +249,7 @@ class ThreadSafeTokenProviderTest extends TestCase
         $this->assertEquals($existingToken, $token);
     }
 
-    public function testExpiryBufferPreventsExpiredTokens()
+    public function test_expiry_buffer_prevents_expired_tokens()
     {
         // This test verifies expiry buffer prevents using nearly-expired tokens
         $expiryBuffer = 120; // 2 minutes
@@ -242,27 +265,27 @@ class ThreadSafeTokenProviderTest extends TestCase
         ];
 
         // Mock cache returning almost-expired token
-        Cache::shouldReceive('get')
+        $this->cacheStore->shouldReceive('get')
             ->with($cacheKey)
             ->andReturn($cachedData);
 
         // Mock token generation since cached token should be rejected
-        Cache::shouldReceive('forget')
+        $this->cacheStore->shouldReceive('forget')
             ->once()
             ->with($cacheKey);
 
         $mockLock = Mockery::mock(\Illuminate\Contracts\Cache\Lock::class);
-        Cache::shouldReceive('lock')
+        $this->cacheStore->shouldReceive('lock')
             ->andReturn($mockLock);
 
         $mockLock->shouldReceive('block')
             ->andThrow(new Exception('Lock not supported'));
 
-        Cache::shouldReceive('get')
+        $this->cacheStore->shouldReceive('get')
             ->with($cacheKey)
             ->andReturn(null);
 
-        Cache::shouldReceive('put')
+        $this->cacheStore->shouldReceive('put')
             ->once();
 
         // Get token - should generate new one, not use almost-expired
@@ -272,7 +295,7 @@ class ThreadSafeTokenProviderTest extends TestCase
         $this->assertNotEquals($almostExpiredToken, $token);
     }
 
-    public function testClearTokenCacheRemovesAllCaches()
+    public function test_clear_token_cache_removes_all_caches()
     {
         // This test verifies clearTokenCache removes from all cache levels
         $provider = new ThreadSafeTokenProvider($this->config);
@@ -283,7 +306,7 @@ class ThreadSafeTokenProviderTest extends TestCase
         $reflection = new \ReflectionClass($provider);
         $staticCache = $reflection->getProperty('staticCache');
         $staticCache->setAccessible(true);
-        $staticCache->setValue([
+        $staticCache->setValue(null, [
             'test_account:test_user' => [
                 'token' => 'test_token',
                 'expiry' => time() + 3600,
@@ -291,7 +314,7 @@ class ThreadSafeTokenProviderTest extends TestCase
         ]);
 
         // Mock Laravel cache forget
-        Cache::shouldReceive('forget')
+        $this->cacheStore->shouldReceive('forget')
             ->once()
             ->with($cacheKey);
 
@@ -303,7 +326,46 @@ class ThreadSafeTokenProviderTest extends TestCase
         $this->assertArrayNotHasKey('test_account:test_user', $staticCacheValue);
     }
 
-    public function testValidateExpiryBufferEnforcesMinimum()
+    public function test_validates_cache_drivers_independently_per_store()
+    {
+        $redisLock = Mockery::mock(Lock::class);
+        $memcachedLock = Mockery::mock(Lock::class);
+        $redisStore = Mockery::mock();
+        $memcachedStore = Mockery::mock();
+
+        Cache::shouldReceive('store')
+            ->once()
+            ->with('redis')
+            ->andReturn($redisStore);
+        $redisStore->shouldReceive('lock')
+            ->once()
+            ->withArgs(fn ($key, $seconds) => str_starts_with($key, 'snowflake_test_lock_') && $seconds === 1)
+            ->andReturn($redisLock);
+        $redisLock->shouldReceive('forceRelease')->once();
+
+        $providerRedis = new ThreadSafeTokenProvider($this->makeConfig(cacheDriver: 'redis'));
+        $this->assertInstanceOf(ThreadSafeTokenProvider::class, $providerRedis);
+
+        Cache::shouldReceive('store')
+            ->once()
+            ->with('memcached')
+            ->andReturn($memcachedStore);
+        $memcachedStore->shouldReceive('lock')
+            ->once()
+            ->withArgs(fn ($key, $seconds) => str_starts_with($key, 'snowflake_test_lock_') && $seconds === 1)
+            ->andReturn($memcachedLock);
+        $memcachedLock->shouldReceive('forceRelease')->once();
+
+        $providerMemcached = new ThreadSafeTokenProvider($this->makeConfig(
+            account: 'second_account',
+            user: 'second_user',
+            cacheDriver: 'memcached'
+        ));
+
+        $this->assertInstanceOf(ThreadSafeTokenProvider::class, $providerMemcached);
+    }
+
+    public function test_validate_expiry_buffer_enforces_minimum()
     {
         // This test verifies expiry buffer validation
         $provider = new ThreadSafeTokenProvider($this->config);
@@ -317,7 +379,7 @@ class ThreadSafeTokenProviderTest extends TestCase
         $method->invoke($provider, 10); // Too low
     }
 
-    public function testValidateExpiryBufferEnforcesMaximum()
+    public function test_validate_expiry_buffer_enforces_maximum()
     {
         // This test verifies expiry buffer validation
         $provider = new ThreadSafeTokenProvider($this->config);
@@ -340,35 +402,83 @@ class ThreadSafeTokenProviderTest extends TestCase
     {
         // This is a test-only RSA private key (2048-bit)
         // DO NOT use in production
-        return <<<EOT
------BEGIN RSA PRIVATE KEY-----
-MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/xtB4x+3TZkJ2sPK8AQr6RpppKNkCaZ3L
-dRN7j8KoFvLgAFk8hT5iHKLEa+AQZX+HmLTYSLrJ5RfCdN0d5l8rF6V5lMpZQXpr
-wKLaIXAKLQ3nqBrKCvSYLnJuNz6QPy5WKELGp9p6hT8dKBLrQxQAkqw+Y0kZRNDi
-nZiPCH0kW0qZd9xHxb3EqRQZqD3chDPtPjB5aVPOTLa7XCVW3/kXJYX0bXH8tVPk
-lLkW7jMvZLqQJUHKP7VgGlFCDk3nZSNs5Q7lW7Gg9MdQmXdCXN/AQVzYF/Bp3fXw
-JLF3W6PWVP1YhcQW9XN8YHCzYHMKIgQ5AQQqzQIDAQABAoIBABz8qUK8QVYSJvHs
-mXYOKV3FoKJ1qMvQA+oQQp3kq2dFvmVQDqQcN3x2wN3V6QmH5qV/5p/i4fOt8j8k
-hFYmQXqVTGaJHiN1kqQU8E/A8pqMkYxkJqC3KXQ7LVQ5xRXKb8LqnPOqvxVXjJKc
-u6nYCN4kQqW7BXgD5h6+2sNS5fEqQRFv7pJRJvX2HXaQmSqLk7n4QdBVk5WPQNLr
-JqQw3xQmJKVqMz8xCbPtZLBR7bMHCQW9YHPz2x5+6Jxt8UHYdxFqsrK4xqxQMJLp
-5cLNqP3YVqKQfUxQqPxqQPNqQNp4LqQP6xQqPxqQPNqQNp4LqQP6xQqPxqQPNqQN
-p4LqQP6xQAECgYEA9fQx8QqLxQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4
-Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3x
-Q4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q0CgY
-EA2fQx8QqLxQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q
-8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q
-6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6QECgYEAqfQx8QqLxQP3
-xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQ
-P3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8
-xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q0CgYB3fQx8QqLxQP3xQ4Q6Q8xQP3xQ4Q
-6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ
-4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3xQ4Q6Q8xQP3
-xQ4Q6Q8xQP3xQ4Q6QQKBgQDJ9DHxCovFA/fFDhDpDzFA/fFDhDpDzFA/fFDhDpDz
-FA/fFDhDpDzFA/fFDhDpDzFA/fFDhDpDzFA/fFDhDpDzFA/fFDhDpDzFA/fFDhDp
-DzFA/fFDhDpDzFA/fFDhDpDzFA/fFDhDpDzFA/fFDhDpDzFA/fFDhDpDzFA/fFDh
-DpA==
------END RSA PRIVATE KEY-----
+        return <<<'EOT'
+-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDDQA5zw+PlPEGy
+va47NyvlcK8jwqO6Y6jIKIF5/w/nK2bb/9EQSjYwOLcAzqulz+j/Qrqane6Zvrq6
+ftMnXBPtr6R+arSW8VpXhpGQnsEBimtQnzJf0ehroLVzcSwauXNhAmlRuqvT6jPA
+MaaGHCvnbHBBGue/owktyESC9ucfdKpILjvvZ6a+LJpUyKbLIt114S/v/2uyptV5
+L2ujyECmjB5rDQIgZsms7ztw/7rP5oHW2Xwe31cXNm32FLaF+5xh0LLnBSo+lIjs
+Lutri7F+jI9PLtOdQGTCtaMHe7JXuzhTRMiqoxqN52+KLF2cAGtaKwsGhuw4Vx4O
+wJexvRBFAgMBAAECggEAFwkTq2zNElqNlbzzNWFI+ITW5O0ty+u+Gf9NZ0tEYQ2p
+0QLZc4aN5hqK3LmFXsaswpDo2x0O7WynMyGLX/VpFH3IdnG4ZKaM9g6WVe2k772Y
+86YUl2F4flozji8n+O8wQZ27Nz1C0HmtKVuyPdhNBbyxcbzu4pklmBUsoBbpJbi1
+AIQ1u8c0DFJesj/W2ovO6VWjQCH/JFrChzD0OIs8vpT4+Xdl8dEqRR4hZAuOBEPm
+dl84zRkNZ+M4r/qss0tNbOwPU6/MQjb19NjNLv2burTpB5KPfrdwwp10VuP9JQxa
+t4dHtYfjle4EOJuC+YE5cf2YIfBOFE4+N2zqbCrRcQKBgQDyhdOuJq5oKDOMjslV
+EsDjDApJNM3vmViwbukG9pYsUM2EGPw9533fYd3c7Gm6aOM9S6g20INRsADhSY0S
+7xV2R334/WKiIpMrJv0kXLc7+QjoM1I7UhtUzqCcJ/slO6B4GwSf4MU/BGzVWIwu
+ZBlZJaaCoouk4uBo5ChrXSnnzwKBgQDOGbjGM9V1kBDK31daYdA/56LVlpl4tchJ
+yvzHKOjMoGHHiHwPRgzvYfdUHabAtNJw1bLSNUR/NrdzZ68VJ6bz5uN4oTiVjSHO
+vr8FLXZ4sIj1fs4wr5El3q+/WInSEy5933Oz0fVk8i7o6CHajsZC98LXEsiOCOeX
+tdBlxaJ3qwKBgQCKUa1zS/h4y0TrS5ykeresRveu3QD/QFSG/BrHr+fiiotMZfun
+StpNh0HEeMmsWZoRIY9lA/OBqYI2+34MaHOzK/86/Tk+A74wBGKoVIDlIZnk5TBn
+SOLxsY+EwIDKsYFKPw6aKNYWpO11mLUK2GhkocagBxjiB8u5xzcOVOpLnQKBgEE1
+FCfpeGzkstttBFc9QUUmxXcsWcw+P2tRhN6CS/2J9MXLoey3LhqC9VywsPShgT9f
+7V7iqZRSPIKP2G4qCIF8mJWu9JckewDNiuRZePVAbWS2xQfUVGkV5qb0nU5Q8VGz
+5AiNskVI9pyL7UIYEBRaDVQ8xiViHdv7Ez9P41JXAoGBAPBoZmeZkb2uMWf8q3vB
+YtFimXSRGg3ysMhdzOQAV1f6TlRoe9SM1vzmO8c+/ctrXZxrDlQ46eMbj6puQ5aG
+yqmySSC/2dw6MTELJHWzRgqKWG0scGQhdBMoYDWrM76/GdSwjP5o062tzpCE3Dml
+zhJl36pyFVUPUMigejPLFZJa
+-----END PRIVATE KEY-----
 EOT;
+    }
+
+    private function makeConfig(
+        string $account = 'test_account',
+        string $user = 'test_user',
+        ?string $cacheDriver = null
+    ): SnowflakeConfig {
+        return new SnowflakeConfig(
+            'https://test.snowflakecomputing.com',
+            $account,
+            $user,
+            'test_public_key_fingerprint',
+            $this->getTestPrivateKey(),
+            '',
+            'test_warehouse',
+            'test_database',
+            'test_schema',
+            30,
+            $cacheDriver
+        );
+    }
+
+    private function resetProviderState(): void
+    {
+        $reflection = new \ReflectionClass(ThreadSafeTokenProvider::class);
+
+        foreach (['staticCache', 'driverValidated', 'driverSupportsLocks'] as $propertyName) {
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $property->setValue(null, []);
+        }
+    }
+
+    private function setDriverLockSupport(string $driver, bool $supportsLocks): void
+    {
+        $reflection = new \ReflectionClass(ThreadSafeTokenProvider::class);
+
+        $validatedProperty = $reflection->getProperty('driverValidated');
+        $validatedProperty->setAccessible(true);
+        $validatedDrivers = $validatedProperty->getValue();
+        $validatedDrivers[$driver] = true;
+        $validatedProperty->setValue(null, $validatedDrivers);
+
+        $supportsLocksProperty = $reflection->getProperty('driverSupportsLocks');
+        $supportsLocksProperty->setAccessible(true);
+        $driverSupportsLocks = $supportsLocksProperty->getValue();
+        $driverSupportsLocks[$driver] = $supportsLocks;
+        $supportsLocksProperty->setValue(null, $driverSupportsLocks);
     }
 }

@@ -26,6 +26,8 @@ class SnowflakeConfig
 
     private $timeout;
 
+    private $cacheDriver;
+
     /**
      * Initialize the Snowflake API configuration
      *
@@ -39,6 +41,7 @@ class SnowflakeConfig
      * @param  string  $database  The Snowflake database to use
      * @param  string  $schema  The Snowflake schema to use
      * @param  int  $timeout  Timeout in seconds for query execution
+     * @param  string|null  $cacheDriver  The Laravel cache store to use for Snowflake tokens
      */
     public function __construct(
         string $baseUrl,
@@ -50,7 +53,8 @@ class SnowflakeConfig
         string $warehouse,
         string $database,
         string $schema,
-        int $timeout
+        int $timeout,
+        ?string $cacheDriver = null
     ) {
         $this->baseUrl = $baseUrl;
         $this->account = $account;
@@ -62,6 +66,7 @@ class SnowflakeConfig
         $this->database = $database;
         $this->schema = $schema;
         $this->timeout = $timeout;
+        $this->cacheDriver = $cacheDriver;
     }
 
     /**
@@ -142,5 +147,13 @@ class SnowflakeConfig
     public function getTimeout()
     {
         return $this->timeout;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getCacheDriver()
+    {
+        return $this->cacheDriver;
     }
 }

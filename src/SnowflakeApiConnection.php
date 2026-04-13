@@ -71,7 +71,8 @@ class SnowflakeApiConnection extends Connection
                 $config['warehouse'] ?? '',
                 $config['database'] ?? $database,
                 $config['schema'] ?? '',
-                $config['timeout'] ?? 30
+                $config['timeout'] ?? 30,
+                $config['cache_driver'] ?? null
             );
 
             $this->debugLog('SnowflakeApiConnection: SnowflakeService created successfully');

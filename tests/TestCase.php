@@ -42,6 +42,7 @@ abstract class TestCase extends BaseTestCase
             'database' => env('SNOWFLAKE_TEST_DATABASE'), // Use SNOWFLAKE_TEST_DATABASE
             'schema' => env('SNOWFLAKE_TEST_SCHEMA'), // Use SNOWFLAKE_TEST_SCHEMA
             'timeout' => env('SNOWFLAKE_TIMEOUT', 30), // Keep non-TEST version? Check .env
+            'cache_driver' => env('SNOWFLAKE_CACHE_DRIVER'),
             'prefix' => '', // No prefix usually needed
         ]);
 
