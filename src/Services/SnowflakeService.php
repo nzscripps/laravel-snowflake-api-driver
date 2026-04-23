@@ -673,14 +673,19 @@ class SnowflakeService
                 $id
             );
 
+            // Snowflake's /api/v2/statements/{id}/cancel endpoint rejects
+            // POSTs that lack Content-Type: application/json or a body with
+            // HTTP 415 Unsupported Media Type. Send an explicit empty JSON
+            // body so the endpoint accepts the request shape.
             $response = $this->getHttpClient()->request('POST', $url, [
-                'headers' => $this->getHeaders(),
+                'headers' => array_merge($this->getHeaders(), [
+                    'Content-Type: application/json',
+                ]),
+                'body' => '{}',
             ]);
 
-            // Check the status code first
             $statusCode = $response->getStatusCode();
 
-            // Consider any 2xx status code as success for cancellation
             if ($statusCode >= 200 && $statusCode < 300) {
                 $this->debugLog('SnowflakeService: Cancellation successful based on status code', [
                     'statusCode' => $statusCode,
@@ -704,9 +709,6 @@ class SnowflakeService
                     ]);
                 }
             } else {
-                Log::error('SnowflakeService: Cancellation failed with status code', [
-                    'statusCode' => $statusCode,
-                ]);
                 throw new Exception("Failed to cancel statement, received status code: {$statusCode}");
             }
 
