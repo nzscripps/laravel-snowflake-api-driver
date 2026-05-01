@@ -207,6 +207,24 @@ class ThreadSafeTokenProvider
     }
 
     /**
+     * Flush the in-process static token cache.
+     *
+     * Clears only the per-process token memo so the next {@see getToken()} call
+     * re-reads from the configured Laravel cache (typically Redis), which remains
+     * the source of truth across workers. Cache-driver capability flags
+     * ({@see $driverValidated}, {@see $driverSupportsLocks}) are intentionally
+     * preserved because they describe immutable facts about the cache driver.
+     *
+     * Intended for long-running worker teardown hooks (Octane RequestTerminated,
+     * queue workers) so a single PHP process does not pin a stale JWT past its
+     * useful lifetime.
+     */
+    public static function flushStaticCache(): void
+    {
+        self::$staticCache = [];
+    }
+
+    /**
      * Validate that cache driver supports atomic locks
      *
      * @return void

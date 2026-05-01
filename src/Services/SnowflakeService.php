@@ -197,6 +197,23 @@ class SnowflakeService
     }
 
     /**
+     * Reset transient resources held by this service so the next request rebuilds them.
+     *
+     * Nulls out the cached Symfony HttpClient (closing curl handles, DNS cache, and
+     * accumulated TCP connections) and resets the creation timestamp. The next call
+     * to {@see getHttpClient()} will lazily build a fresh client. Safe to call from
+     * any long-running worker teardown hook (Octane RequestTerminated, queue worker
+     * loop, FrankenPHP request boundary).
+     */
+    public function resetForLongRunningRequest(): void
+    {
+        $this->httpClient = null;
+        $this->httpClientCreatedAt = 0;
+
+        $this->debugLog('SnowflakeService: HTTP client reset for long-running worker');
+    }
+
+    /**
      * Test the connection by attempting to generate an access token
      */
     public function testConnection(): void

@@ -14,6 +14,7 @@ use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\SchemaGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Processor as SnowflakeProcessor;
 use LaravelSnowflakeApi\Flavours\Snowflake\SnowflakeQueryBuilder;
 use LaravelSnowflakeApi\Services\SnowflakeService;
+use LaravelSnowflakeApi\Services\ThreadSafeTokenProvider;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 use PDO;
 use Throwable;
@@ -520,6 +521,21 @@ class SnowflakeApiConnection extends Connection
     public function getSnowflakeService(): SnowflakeService
     {
         return $this->snowflakeService;
+    }
+
+    /**
+     * Release per-request transient state held by this connection.
+     *
+     * Forwards to {@see SnowflakeService::resetForLongRunningRequest()} (drops the
+     * cached HttpClient and curl handles) and flushes the in-process JWT memo via
+     * {@see ThreadSafeTokenProvider::flushStaticCache()}. Call this from any
+     * long-running worker boundary (Octane RequestTerminated, queue worker loop,
+     * FrankenPHP request end) to avoid file-descriptor and connection pile-up.
+     */
+    public function resetForLongRunningRequest(): void
+    {
+        $this->snowflakeService->resetForLongRunningRequest();
+        ThreadSafeTokenProvider::flushStaticCache();
     }
 
     /**

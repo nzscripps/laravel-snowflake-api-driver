@@ -44,6 +44,74 @@ class SnowflakeApiServiceProvider extends ServiceProvider
 
         // Validate cache driver configuration for thread-safe token management
         $this->validateCacheDriver();
+
+        // Hook into Octane's per-request teardown so we drop accumulated curl /
+        // TCP / DNS state that would otherwise leak across workers.
+        $this->registerLongRunningRequestResetListener();
+    }
+
+    /**
+     * Wire the per-request reset listener for long-running worker runtimes.
+     *
+     * Registers a listener for Laravel Octane's RequestTerminated event when
+     * the package is installed. Falls back to a no-op when Octane is absent so
+     * the package still works under PHP-FPM. Gated on the
+     * `snowflake_api.octane.reset_per_request` config flag (default true) so
+     * consumers can disable the hook without forking the package.
+     */
+    private function registerLongRunningRequestResetListener(): void
+    {
+        try {
+            $enabled = (bool) config('snowflake_api.octane.reset_per_request', true);
+        } catch (\Exception $e) {
+            $enabled = true;
+        }
+
+        if (! $enabled) {
+            return;
+        }
+
+        $eventClass = 'Laravel\\Octane\\Events\\RequestTerminated';
+
+        if (! class_exists($eventClass)) {
+            return;
+        }
+
+        try {
+            $events = $this->app['events'];
+        } catch (\Exception $e) {
+            return;
+        }
+
+        $events->listen($eventClass, static function ($event): void {
+            try {
+                $manager = function_exists('app') ? app('db') : null;
+
+                if ($manager === null || ! method_exists($manager, 'getConnections')) {
+                    return;
+                }
+
+                foreach ($manager->getConnections() as $connection) {
+                    if (! $connection instanceof SnowflakeApiConnection) {
+                        continue;
+                    }
+
+                    try {
+                        $connection->resetForLongRunningRequest();
+                    } catch (\Throwable $inner) {
+                        \Illuminate\Support\Facades\Log::warning(
+                            'Snowflake API Driver: resetForLongRunningRequest failed for connection',
+                            ['error' => $inner->getMessage()]
+                        );
+                    }
+                }
+            } catch (\Throwable $outer) {
+                \Illuminate\Support\Facades\Log::warning(
+                    'Snowflake API Driver: per-request reset listener errored',
+                    ['error' => $outer->getMessage()]
+                );
+            }
+        });
     }
 
     /**
