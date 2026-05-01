@@ -398,7 +398,7 @@ class QueryGrammar extends Grammar
     {
         // If not an array, just return a single value
         if (!is_array($record)) {
-            return '(' . $this->parameter($record) . ')';
+            return '(' . $this->literalParameter($record) . ')';
         }
 
         $values = [];
@@ -410,12 +410,12 @@ class QueryGrammar extends Grammar
             // For numeric keys, use values in order with column context
             foreach (array_values($record) as $index => $value) {
                 $columnName = $columns[$index] ?? null;
-                $values[] = $this->parameter($value, ['column' => $columnName]);
+                $values[] = $this->literalParameter($value, ['column' => $columnName]);
             }
         } else {
             // For associative arrays, map values to columns
             foreach ($columns as $column) {
-                $values[] = $this->parameter($record[$column] ?? null, ['column' => $column]);
+                $values[] = $this->literalParameter($record[$column] ?? null, ['column' => $column]);
             }
         }
 
@@ -446,6 +446,20 @@ class QueryGrammar extends Grammar
      * @return string
      */
     public function parameter($value, array $context = []): string
+    {
+        return $value instanceof Expression ? $this->getValue($value) : '?';
+    }
+
+    /**
+     * Format a value as a literal for Snowflake SQL.
+     *
+     * Custom insert/upsert compilers inline values because the driver sends SQL
+     * through Snowflake's REST API after client-side binding replacement. Normal
+     * query-builder predicates must still emit '?' placeholders so Laravel's
+     * binding list remains aligned when where() and whereRaw(..., bindings) are
+     * mixed in one query.
+     */
+    protected function literalParameter($value, array $context = []): string
     {
         if (is_null($value)) {
             return 'NULL';
@@ -562,7 +576,7 @@ class QueryGrammar extends Grammar
         $columns = $this->columnize(array_keys($firstRow));
 
         $parameters = collect($values)->map(function ($record) {
-            return '(' . $this->parameter($record) . ')';
+            return '(' . $this->literalParameter($record) . ')';
         })->implode(', ');
 
         // Create a temporary alias for the source data
