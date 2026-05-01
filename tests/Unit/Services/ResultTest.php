@@ -72,6 +72,48 @@ class ResultTest extends TestCase
     }
 
     /** @test */
+    public function it_maps_rows_without_building_an_intermediate_result_array()
+    {
+        // Arrange
+        $this->result->setFields([
+            ['name' => 'id', 'type' => 'INTEGER'],
+            ['name' => 'name', 'type' => 'VARCHAR'],
+        ]);
+        $this->result->setData([
+            ['1', 'alpha'],
+            ['2', 'bravo'],
+        ]);
+
+        // Act
+        $mapped = $this->result->mapRows(static fn (array $row): string => $row['id'].':'.$row['name']);
+
+        // Assert
+        $this->assertSame(['1:alpha', '2:bravo'], $mapped);
+    }
+
+    /** @test */
+    public function it_converts_external_row_batches_with_existing_metadata()
+    {
+        // Arrange
+        $this->result->setFields([
+            ['name' => 'id', 'type' => 'INTEGER'],
+            ['name' => 'active', 'type' => 'BOOLEAN'],
+        ]);
+
+        // Act
+        $rows = iterator_to_array($this->result->rowsFrom([
+            ['10', 'true'],
+            ['11', 'false'],
+        ]), false);
+
+        // Assert
+        $this->assertSame(10, $rows[0]['id']);
+        $this->assertTrue($rows[0]['active']);
+        $this->assertSame(11, $rows[1]['id']);
+        $this->assertFalse($rows[1]['active']);
+    }
+
+    /** @test */
     public function it_sets_and_gets_properties_correctly()
     {
         // Arrange & Act

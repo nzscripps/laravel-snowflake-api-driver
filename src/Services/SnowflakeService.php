@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace LaravelSnowflakeApi\Services;
 
 use Exception;
+use Generator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -81,6 +82,7 @@ class SnowflakeService
      * @param  string  $schema  The Snowflake schema to use
      * @param  int  $timeout  Timeout in seconds for query execution
      * @param  string|null  $cacheDriver  The Laravel cache store to use for Snowflake tokens
+     * @param  int  $partitionConcurrency  Maximum concurrent result partition fetches
      */
     public function __construct(
         string $baseUrl,
@@ -93,7 +95,8 @@ class SnowflakeService
         string $database,
         string $schema,
         int $timeout,
-        ?string $cacheDriver = null
+        ?string $cacheDriver = null,
+        int $partitionConcurrency = 4
     ) {
         $this->config = new SnowflakeConfig(
             $baseUrl,
@@ -106,7 +109,8 @@ class SnowflakeService
             $database,
             $schema,
             $timeout,
-            $cacheDriver
+            $cacheDriver,
+            $partitionConcurrency
         );
 
         // Initialize thread-safe token provider
@@ -126,6 +130,7 @@ class SnowflakeService
             'schema' => $this->config->getSchema(),
             'timeout' => $this->config->getTimeout(),
             'cache_driver' => $this->config->getCacheDriver(),
+            'partition_concurrency' => $this->config->getPartitionConcurrency(),
             'has_privateKey' => ! empty($this->config->getPrivateKey()),
             'has_publicKey' => ! empty($this->config->getPublicKey()),
             'has_passphrase' => ! empty($this->config->getPrivateKeyPassphrase()),
@@ -241,122 +246,8 @@ class SnowflakeService
         ]);
 
         try {
-            $statementId = $this->postStatement($query);
-            $this->debugLog('SnowflakeService: Statement posted', ['statementId' => $statementId]);
-
-            $result = $this->getResult($statementId);
-            $this->debugLog('SnowflakeService: Initial result retrieved', [
-                'executed' => $result->isExecuted(),
-                'id' => $result->getId(),
-            ]);
-
-            $startTime = time();
-            while (! $result->isExecuted()) {
-                $timeElapsed = time() - $startTime;
-
-                if ($timeElapsed >= $this->config->getTimeout()) {
-                    $this->cancelStatement($statementId);
-
-                    return collect();
-                }
-
-                // Reduce blocking time
-                usleep(250000); // 0.25 seconds instead of 1
-                $result = $this->getResult($statementId);
-            }
-
-            // Process result once all pages have been collected
-            if ($result->getPageTotal() > 1) {
-                $this->debugLog('SnowflakeService: Multiple pages detected, retrieving all pages', [
-                    'total_pages' => $result->getPageTotal(),
-                ]);
-
-                // Create and process requests concurrently
-                $responses = [];
-                $pageToResponseMap = [];
-                foreach (range(2, $result->getPageTotal()) as $page) {
-                    $url = sprintf(
-                        'https://%s.snowflakecomputing.com/api/v2/statements/%s?%s',
-                        $this->config->getAccount(),
-                        $statementId,
-                        http_build_query(['partition' => $page - 1])
-                    );
-                    $response = $this->getHttpClient()->request('GET', $url, [
-                        'headers' => $this->getHeaders(),
-                    ]);
-                    $responses[$page] = $response;
-                    $pageToResponseMap[spl_object_id($response)] = $page;
-                }
-
-                // Process responses as they complete, with retry for failures
-                $failedPages = [];
-                foreach ($this->getHttpClient()->stream($responses) as $response => $chunk) {
-                    if ($chunk->isFirst()) {
-                        $this->debugLog('SnowflakeService: Started receiving page response');
-                    } elseif ($chunk->isLast()) {
-                        $pageNumber = $pageToResponseMap[spl_object_id($response)] ?? 'unknown';
-                        try {
-                            $pageData = $this->toArray($response);
-                            $result->addPageData($pageData['data'] ?? []);
-                        } catch (Exception $e) {
-                            // Capture detailed response info for diagnostics
-                            if ($this->isDiagnosticLoggingEnabled()) {
-                                $streamingDetails = [
-                                    'context' => 'streaming_partition_failure',
-                                    'statement_id' => $statementId,
-                                    'partition' => $pageNumber,
-                                    'total_partitions' => $result->getPageTotal(),
-                                    'error_message' => $e->getMessage(),
-                                    'error_code' => $e->getCode(),
-                                    'chunk_is_timeout' => $chunk->isTimeout(),
-                                ];
-
-                                // Try to get response info even though it may have failed
-                                try {
-                                    $info = $response->getInfo();
-                                    $streamingDetails['http_code'] = $info['http_code'] ?? null;
-                                    $streamingDetails['total_time_ms'] = isset($info['total_time']) ? round($info['total_time'] * 1000, 2) : null;
-                                    $streamingDetails['primary_ip'] = $info['primary_ip'] ?? 'unknown';
-                                    $streamingDetails['url'] = $info['url'] ?? 'unknown';
-                                } catch (Exception $infoError) {
-                                    $streamingDetails['info_error'] = $infoError->getMessage();
-                                }
-
-                                $this->diagnosticLog('Partition fetch failed during streaming', $streamingDetails);
-                            }
-
-                            // Track failed pages for retry
-                            $this->debugLog('SnowflakeService: Page fetch failed, will retry', [
-                                'page' => $pageNumber,
-                                'error' => $e->getMessage(),
-                            ]);
-                            $failedPages[] = $pageNumber;
-                        }
-                    }
-                }
-
-                // Retry failed pages with exponential backoff
-                if (! empty($failedPages)) {
-                    $this->debugLog('SnowflakeService: Retrying failed pages', [
-                        'failed_pages' => $failedPages,
-                    ]);
-
-                    foreach ($failedPages as $page) {
-                        $retryData = $this->fetchPartitionWithRetry($statementId, $page);
-                        if ($retryData !== null) {
-                            $result->addPageData($retryData);
-                        }
-                    }
-                }
-            }
-
-            // Get the transformed data with column names as keys
-            $data = $result->toArray();
-            $this->debugLog('SnowflakeService: Processed result data', [
-                'row_count' => count($data),
-            ]);
-
-            $collection = collect($data);
+            $rows = $this->executeQueryMapped($query, static fn (array $row): array => $row);
+            $collection = collect($rows);
             $this->debugLog('SnowflakeService: Query execution completed', [
                 'total_results' => $collection->count(),
             ]);
@@ -366,6 +257,214 @@ class SnowflakeService
             $this->handleError($e, 'Error executing query', ['query' => $query]);
             throw $e;
         }
+    }
+
+    /**
+     * Execute a SQL query and map each converted row directly into the caller's
+     * target representation.
+     *
+     * This avoids a full intermediate associative-row array for callers such as
+     * SnowflakeApiConnection::select(), which ultimately need row objects.
+     *
+     * @return array<int, mixed>
+     */
+    public function executeQueryMapped(string $query, callable $rowMapper): array
+    {
+        $result = $this->executeQueryResult($query);
+        $rows = $result->mapRows($rowMapper);
+
+        $this->debugLog('SnowflakeService: Processed mapped result data', [
+            'row_count' => count($rows),
+        ]);
+
+        return $rows;
+    }
+
+    /**
+     * Execute a SQL query and yield converted associative rows partition by
+     * partition. This is the low-memory read path for large result sets.
+     *
+     * @return Generator<int, array<string, mixed>>
+     */
+    public function cursor(string $query): Generator
+    {
+        $this->debugLog('SnowflakeService: Starting cursor query execution', [
+            'query' => $query,
+        ]);
+
+        try {
+            $statementId = $this->postStatement($query);
+            $result = $this->waitForStatement($statementId);
+
+            foreach ($result->rows() as $row) {
+                yield $row;
+            }
+
+            if ($result->getPageTotal() <= 1) {
+                return;
+            }
+
+            foreach (range(2, $result->getPageTotal()) as $page) {
+                $pageData = $this->fetchPartitionWithRetry($statementId, $page);
+
+                foreach ($result->rowsFrom($pageData ?? []) as $row) {
+                    yield $row;
+                }
+            }
+        } catch (Exception $e) {
+            $this->handleError($e, 'Error executing cursor query', ['query' => $query]);
+            throw $e;
+        }
+    }
+
+    private function executeQueryResult(string $query): Result
+    {
+        $statementId = $this->postStatement($query);
+        $this->debugLog('SnowflakeService: Statement posted', ['statementId' => $statementId]);
+
+        $result = $this->waitForStatement($statementId);
+        $this->fetchRemainingPartitions($statementId, $result);
+
+        return $result;
+    }
+
+    private function waitForStatement(string $statementId): Result
+    {
+        $result = $this->getResult($statementId);
+        $this->debugLog('SnowflakeService: Initial result retrieved', [
+            'executed' => $result->isExecuted(),
+            'id' => $result->getId(),
+        ]);
+
+        $startTime = time();
+        while (! $result->isExecuted()) {
+            $timeElapsed = time() - $startTime;
+
+            if ($timeElapsed >= $this->config->getTimeout()) {
+                $this->cancelStatement($statementId);
+
+                return new Result($this);
+            }
+
+            // Reduce blocking time
+            usleep(250000); // 0.25 seconds instead of 1
+            $result = $this->getResult($statementId);
+        }
+
+        return $result;
+    }
+
+    private function fetchRemainingPartitions(string $statementId, Result $result): void
+    {
+        if ($result->getPageTotal() <= 1) {
+            return;
+        }
+
+        $this->debugLog('SnowflakeService: Multiple pages detected, retrieving all pages', [
+            'total_pages' => $result->getPageTotal(),
+            'partition_concurrency' => $this->config->getPartitionConcurrency(),
+        ]);
+
+        foreach (array_chunk(range(2, $result->getPageTotal()), $this->config->getPartitionConcurrency()) as $pages) {
+            $this->fetchPartitionBatch($statementId, $result, $pages);
+        }
+    }
+
+    /**
+     * @param  array<int, int>  $pages
+     */
+    private function fetchPartitionBatch(string $statementId, Result $result, array $pages): void
+    {
+        $responses = [];
+        $pageToResponseMap = [];
+        foreach ($pages as $page) {
+            $url = sprintf(
+                'https://%s.snowflakecomputing.com/api/v2/statements/%s?%s',
+                $this->config->getAccount(),
+                $statementId,
+                http_build_query(['partition' => $page - 1])
+            );
+            $response = $this->getHttpClient()->request('GET', $url, [
+                'headers' => $this->getHeaders(),
+            ]);
+            $responses[$page] = $response;
+            $pageToResponseMap[spl_object_id($response)] = $page;
+        }
+
+        // Process responses as they complete, with retry for failures
+        $failedPages = [];
+        foreach ($this->getHttpClient()->stream($responses) as $response => $chunk) {
+            if ($chunk->isFirst()) {
+                $this->debugLog('SnowflakeService: Started receiving page response');
+            } elseif ($chunk->isLast()) {
+                $pageNumber = $pageToResponseMap[spl_object_id($response)] ?? 'unknown';
+                try {
+                    $pageData = $this->toArray($response);
+                    $result->addPageData($pageData['data'] ?? []);
+                } catch (Exception $e) {
+                    $this->logPartitionStreamingFailure($statementId, $result, $response, $chunk, $pageNumber, $e);
+
+                    // Track failed pages for retry
+                    $this->debugLog('SnowflakeService: Page fetch failed, will retry', [
+                        'page' => $pageNumber,
+                        'error' => $e->getMessage(),
+                    ]);
+                    if (is_int($pageNumber)) {
+                        $failedPages[] = $pageNumber;
+                    }
+                }
+            }
+        }
+
+        // Retry failed pages with exponential backoff
+        if (! empty($failedPages)) {
+            $this->debugLog('SnowflakeService: Retrying failed pages', [
+                'failed_pages' => $failedPages,
+            ]);
+
+            foreach ($failedPages as $page) {
+                $retryData = $this->fetchPartitionWithRetry($statementId, $page);
+                if ($retryData !== null) {
+                    $result->addPageData($retryData);
+                }
+            }
+        }
+    }
+
+    private function logPartitionStreamingFailure(
+        string $statementId,
+        Result $result,
+        ResponseInterface $response,
+        object $chunk,
+        int|string $pageNumber,
+        Exception $e
+    ): void {
+        if (! $this->isDiagnosticLoggingEnabled()) {
+            return;
+        }
+
+        $streamingDetails = [
+            'context' => 'streaming_partition_failure',
+            'statement_id' => $statementId,
+            'partition' => $pageNumber,
+            'total_partitions' => $result->getPageTotal(),
+            'error_message' => $e->getMessage(),
+            'error_code' => $e->getCode(),
+            'chunk_is_timeout' => method_exists($chunk, 'isTimeout') ? $chunk->isTimeout() : null,
+        ];
+
+        // Try to get response info even though it may have failed
+        try {
+            $info = $response->getInfo();
+            $streamingDetails['http_code'] = $info['http_code'] ?? null;
+            $streamingDetails['total_time_ms'] = isset($info['total_time']) ? round($info['total_time'] * 1000, 2) : null;
+            $streamingDetails['primary_ip'] = $info['primary_ip'] ?? 'unknown';
+            $streamingDetails['url'] = $info['url'] ?? 'unknown';
+        } catch (Exception $infoError) {
+            $streamingDetails['info_error'] = $infoError->getMessage();
+        }
+
+        $this->diagnosticLog('Partition fetch failed during streaming', $streamingDetails);
     }
 
     /**

@@ -13,6 +13,7 @@ use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\SchemaGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Processor as SnowflakeProcessor;
 use LaravelSnowflakeApi\Flavours\Snowflake\SnowflakeQueryBuilder;
+use LaravelSnowflakeApi\Services\CaseInsensitiveRow;
 use LaravelSnowflakeApi\Services\SnowflakeService;
 use LaravelSnowflakeApi\Services\ThreadSafeTokenProvider;
 use LaravelSnowflakeApi\Traits\DebugLogging;
@@ -73,7 +74,8 @@ class SnowflakeApiConnection extends Connection
                 $config['database'] ?? $database,
                 $config['schema'] ?? '',
                 $config['timeout'] ?? 30,
-                $config['cache_driver'] ?? null
+                $config['cache_driver'] ?? null,
+                (int) ($config['partition_concurrency'] ?? 4)
             );
 
             $this->debugLog('SnowflakeApiConnection: SnowflakeService created successfully');
@@ -198,16 +200,13 @@ class SnowflakeApiConnection extends Connection
                     'prepared_query' => $statement,
                 ]);
 
-                $result = $this->snowflakeService->ExecuteQuery($statement);
+                $objects = $this->snowflakeService->executeQueryMapped(
+                    $statement,
+                    static fn (array $row): CaseInsensitiveRow => new CaseInsensitiveRow($row)
+                );
 
                 $this->debugLog('SnowflakeApiConnection: Query executed successfully', [
-                    'result_count' => is_countable($result) ? count($result) : 'non-countable',
-                ]);
-
-                $array = $result->toArray();
-
-                $this->debugLog('SnowflakeApiConnection: Converted result to array', [
-                    'array_count' => count($array),
+                    'result_count' => count($objects),
                 ]);
 
                 // Always return CaseInsensitiveRow objects for Laravel compatibility.
@@ -217,10 +216,6 @@ class SnowflakeApiConnection extends Connection
                 //
                 // To get raw associative arrays instead, use:
                 //   DB::connection('snowflake_api')->select(...) and call ->toArray() on each row
-                $objects = array_map(function ($row) {
-                    return new \LaravelSnowflakeApi\Services\CaseInsensitiveRow($row);
-                }, $array);
-
                 return $objects;
             } catch (Exception $e) {
                 Log::error('SnowflakeApiConnection: Error executing select query', [
@@ -230,6 +225,41 @@ class SnowflakeApiConnection extends Connection
                 ]);
                 throw $e;
             }
+        });
+    }
+
+    /**
+     * Run a select statement and lazily yield rows.
+     *
+     * This mirrors Laravel's cursor contract while preserving the driver's
+     * case-insensitive row objects. It avoids loading every Snowflake result
+     * partition into memory before the caller can start processing rows.
+     */
+    public function cursor($query, $bindings = [], $useReadPdo = true)
+    {
+        $this->debugLog('SnowflakeApiConnection: Executing cursor query', [
+            'query' => $query,
+            'bindings_count' => count($bindings),
+            'useReadPdo' => $useReadPdo,
+        ]);
+
+        return $this->run($query, $bindings, function ($query, $bindings) {
+            if ($this->pretending()) {
+                return (function () {
+                    if (false) {
+                        yield null;
+                    }
+                })();
+            }
+
+            $statement = $this->prepareQuery($query, $bindings);
+            $rows = $this->snowflakeService->cursor($statement);
+
+            return (function () use ($rows) {
+                foreach ($rows as $row) {
+                    yield new CaseInsensitiveRow($row);
+                }
+            })();
         });
     }
 

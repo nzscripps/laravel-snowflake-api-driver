@@ -3,6 +3,7 @@
 namespace LaravelSnowflakeApi\Services;
 
 use Exception;
+use Generator;
 use Illuminate\Support\Collection;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 
@@ -144,8 +145,11 @@ class Result
             'new_data_count' => count($pageData),
         ]);
 
-        // Append the new data to the existing data array
-        $this->data = array_merge($this->data, $pageData);
+        // Append rows in place. array_merge() copies the full accumulated
+        // result set on every partition and can double memory for large reads.
+        foreach ($pageData as $row) {
+            $this->data[] = $row;
+        }
 
         $this->debugLog('Result: Data merged successfully', [
             'total_data_count' => count($this->data),
@@ -215,6 +219,74 @@ class Result
             return [];
         }
 
+        return iterator_to_array($this->rows(), false);
+    }
+
+    /**
+     * Lazily convert stored raw Snowflake rows to associative arrays.
+     *
+     * @return Generator<int, array<string, mixed>>
+     */
+    public function rows(): Generator
+    {
+        foreach ($this->rowsFrom($this->data) as $row) {
+            yield $row;
+        }
+    }
+
+    /**
+     * Lazily convert an arbitrary raw Snowflake row batch using this result's
+     * column metadata. Useful for streaming later partitions without appending
+     * them to the in-memory result first.
+     *
+     * @param  array<int, array<int|string, mixed>>  $rows
+     * @return Generator<int, array<string, mixed>>
+     */
+    public function rowsFrom(array $rows): Generator
+    {
+        [$fieldMap, $fieldTypes] = $this->fieldMetadata();
+
+        foreach ($rows as $row) {
+            yield $this->rowToArrayWithMetadata($row, $fieldMap, $fieldTypes);
+        }
+    }
+
+    /**
+     * Convert stored rows and map each converted row directly to the caller's
+     * target representation. This avoids building a full intermediate
+     * associative-row array when callers ultimately need row objects.
+     *
+     * @return array<int, mixed>
+     */
+    public function mapRows(callable $mapper): array
+    {
+        $mapped = [];
+
+        foreach ($this->rows() as $row) {
+            $mapped[] = $mapper($row);
+        }
+
+        return $mapped;
+    }
+
+    /**
+     * Convert one raw Snowflake array row to an associative PHP row.
+     *
+     * @param  array<int|string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    public function rowToArray(array $row): array
+    {
+        [$fieldMap, $fieldTypes] = $this->fieldMetadata();
+
+        return $this->rowToArrayWithMetadata($row, $fieldMap, $fieldTypes);
+    }
+
+    /**
+     * @return array{0: array<int, string>, 1: array<int, string|null>}
+     */
+    private function fieldMetadata(): array
+    {
         $fieldMap = [];
         $fieldTypes = [];
         foreach ($this->fields as $index => $field) {
@@ -222,22 +294,29 @@ class Result
             $fieldTypes[$index] = $field['type'] ?? null;
         }
 
-        $result = [];
-        foreach ($this->data as $row) {
-            $rowData = [];
-            foreach ($fieldMap as $index => $columnName) {
-                $value = $row[$index] ?? null;
+        return [$fieldMap, $fieldTypes];
+    }
 
-                // Optimized type conversion
-                $rowData[$columnName] = $this->convertToNativeType(
-                    is_array($value) && isset($value['Item']) ? $value['Item'] : $value,
-                    $fieldTypes[$index]
-                );
-            }
-            $result[] = $rowData;
+    /**
+     * @param  array<int|string, mixed>  $row
+     * @param  array<int, string>  $fieldMap
+     * @param  array<int, string|null>  $fieldTypes
+     * @return array<string, mixed>
+     */
+    private function rowToArrayWithMetadata(array $row, array $fieldMap, array $fieldTypes): array
+    {
+        $rowData = [];
+        foreach ($fieldMap as $index => $columnName) {
+            $value = $row[$index] ?? null;
+
+            // Optimized type conversion
+            $rowData[$columnName] = $this->convertToNativeType(
+                is_array($value) && isset($value['Item']) ? $value['Item'] : $value,
+                $fieldTypes[$index]
+            );
         }
 
-        return $result;
+        return $rowData;
     }
 
     /**

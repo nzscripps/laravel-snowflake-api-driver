@@ -28,6 +28,8 @@ class SnowflakeConfig
 
     private $cacheDriver;
 
+    private $partitionConcurrency;
+
     /**
      * Initialize the Snowflake API configuration
      *
@@ -42,6 +44,7 @@ class SnowflakeConfig
      * @param  string  $schema  The Snowflake schema to use
      * @param  int  $timeout  Timeout in seconds for query execution
      * @param  string|null  $cacheDriver  The Laravel cache store to use for Snowflake tokens
+     * @param  int  $partitionConcurrency  Maximum concurrent result partition fetches
      */
     public function __construct(
         string $baseUrl,
@@ -54,7 +57,8 @@ class SnowflakeConfig
         string $database,
         string $schema,
         int $timeout,
-        ?string $cacheDriver = null
+        ?string $cacheDriver = null,
+        int $partitionConcurrency = 4
     ) {
         $this->baseUrl = $baseUrl;
         $this->account = $account;
@@ -67,6 +71,7 @@ class SnowflakeConfig
         $this->schema = $schema;
         $this->timeout = $timeout;
         $this->cacheDriver = $cacheDriver;
+        $this->partitionConcurrency = max(1, $partitionConcurrency);
     }
 
     /**
@@ -155,5 +160,13 @@ class SnowflakeConfig
     public function getCacheDriver()
     {
         return $this->cacheDriver;
+    }
+
+    /**
+     * @return int
+     */
+    public function getPartitionConcurrency()
+    {
+        return $this->partitionConcurrency;
     }
 }
