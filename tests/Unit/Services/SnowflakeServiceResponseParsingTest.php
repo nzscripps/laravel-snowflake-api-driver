@@ -429,6 +429,22 @@ class SnowflakeServiceResponseParsingTest extends TestCase
         $this->assertFalse($result);
     }
 
+    public function test_isTransientError_detects_sql_api_rate_limit_message(): void
+    {
+        $service = $this->createService();
+
+        $message = 'Snowflake error, 400 returned with message: Request rate exceeds max. Try later.';
+
+        $this->assertTrue($this->callIsTransientError($service, $message, 400));
+    }
+
+    public function test_isTransientError_detects_http_429(): void
+    {
+        $service = $this->createService();
+
+        $this->assertTrue($this->callIsTransientError($service, 'Too Many Requests', 429));
+    }
+
     // ============================================
     // Helper Methods
     // ============================================

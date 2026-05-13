@@ -62,6 +62,16 @@ class SnowflakeService
     private const HTTP_CLIENT_MAX_AGE = 3600; // 1 hour
 
     /**
+     * Snowflake SQL API cloud-service rate limits return HTTP 429 and/or the message
+     * "Request rate exceeds max. Try later." — retries should use backoff (Snowflake docs).
+     *
+     * @see https://docs.snowflake.com/en/developer-guide/sql-api/index
+     */
+    private const SQL_API_RATE_LIMIT_MAX_ATTEMPTS = 10;
+
+    private const SQL_API_RATE_LIMIT_INITIAL_DELAY_MS = 2000;
+
+    /**
      * Thread-safe token provider
      *
      * @var ThreadSafeTokenProvider
@@ -307,7 +317,7 @@ class SnowflakeService
             foreach (range(2, $result->getPageTotal()) as $page) {
                 $pageData = $this->fetchPartitionWithRetry($statementId, $page);
 
-                foreach ($result->rowsFrom($pageData ?? []) as $row) {
+                foreach ($result->rowsFrom($pageData) as $row) {
                     yield $row;
                 }
             }
@@ -424,9 +434,7 @@ class SnowflakeService
 
             foreach ($failedPages as $page) {
                 $retryData = $this->fetchPartitionWithRetry($statementId, $page);
-                if ($retryData !== null) {
-                    $result->addPageData($retryData);
-                }
+                $result->addPageData($retryData);
             }
         }
     }
@@ -589,22 +597,21 @@ class SnowflakeService
      * on large result sets, particularly for higher partition numbers.
      *
      * Retry strategy:
-     * - Up to 3 attempts (configurable via MAX_PARTITION_RETRIES)
-     * - Exponential backoff: 500ms, 1000ms, 2000ms
-     * - Only retries on 5xx errors (server-side transient failures)
+     * - Up to 3 attempts for generic transient errors (5xx, timeouts, …), or up to 10 for SQL API
+     *   rate limiting (HTTP 429 / "request rate exceeds max") per Snowflake guidance
+     * - Exponential backoff: 500ms base for generic transient errors; 2000ms base for rate limits
      * - Logs each retry attempt for debugging
      *
      * @param  string  $statementId  Statement handle ID
      * @param  int  $page  Page number to retrieve (1-based)
-     * @param  int  $maxRetries  Maximum retry attempts (default: 3)
-     * @return array|null The partition data, or null if all retries fail
+     * @param  int  $maxRetries  Maximum attempts for non-rate-limit transient errors (default: 3)
+     * @return array<int, mixed> Row data for the partition
      */
-    private function fetchPartitionWithRetry(string $statementId, int $page, int $maxRetries = 3): ?array
+    private function fetchPartitionWithRetry(string $statementId, int $page, int $maxRetries = 3): array
     {
-        $baseDelayMs = 500;
         $retryStartTime = microtime(true);
 
-        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+        for ($attempt = 1; ; $attempt++) {
             $attemptStartTime = microtime(true);
 
             try {
@@ -612,7 +619,8 @@ class SnowflakeService
                     'statementId' => $statementId,
                     'page' => $page,
                     'attempt' => $attempt,
-                    'max_retries' => $maxRetries,
+                    'max_retries_transient' => $maxRetries,
+                    'max_retries_rate_limited' => self::SQL_API_RATE_LIMIT_MAX_ATTEMPTS,
                 ]);
 
                 $result = $this->getStatement($statementId, $page);
@@ -641,6 +649,8 @@ class SnowflakeService
             } catch (Exception $e) {
                 $errorMessage = $e->getMessage();
                 $errorCode = $e->getCode();
+                $isRateLimited = $this->isRetryableSqlApiRateLimitError($errorMessage, $errorCode);
+                $maxAttemptsForError = $isRateLimited ? self::SQL_API_RATE_LIMIT_MAX_ATTEMPTS : $maxRetries;
                 $isTransientError = $this->isTransientError($errorMessage, $errorCode);
                 $attemptDuration = round((microtime(true) - $attemptStartTime) * 1000, 2);
 
@@ -651,7 +661,7 @@ class SnowflakeService
                         'statement_id' => $statementId,
                         'partition' => $page,
                         'attempt' => $attempt,
-                        'max_retries' => $maxRetries,
+                        'max_retries' => $maxAttemptsForError,
                         'error_message' => $errorMessage,
                         'error_code' => $errorCode,
                         'is_transient' => $isTransientError,
@@ -692,13 +702,13 @@ class SnowflakeService
                 }
 
                 // If this was the last attempt, log and throw
-                if ($attempt >= $maxRetries) {
+                if ($attempt >= $maxAttemptsForError) {
                     if ($this->isDiagnosticLoggingEnabled()) {
                         $this->diagnosticLog('All partition retry attempts exhausted', [
                             'context' => 'partition_retry_exhausted',
                             'statement_id' => $statementId,
                             'partition' => $page,
-                            'total_attempts' => $maxRetries,
+                            'total_attempts' => $maxAttemptsForError,
                             'total_duration_ms' => round((microtime(true) - $retryStartTime) * 1000, 2),
                             'final_error' => $errorMessage,
                         ]);
@@ -706,7 +716,7 @@ class SnowflakeService
 
                     Log::error('SnowflakeService: All retry attempts failed for partition', [
                         'page' => $page,
-                        'attempts' => $maxRetries,
+                        'attempts' => $maxAttemptsForError,
                         'last_error' => $errorMessage,
                     ]);
 
@@ -714,18 +724,42 @@ class SnowflakeService
                     throw $e;
                 }
 
-                // Exponential backoff: 500ms, 1000ms, 2000ms, ...
-                $delayMs = $baseDelayMs * pow(2, $attempt - 1);
+                $delayMs = $this->sqlApiRetryDelayMs($attempt, $isRateLimited);
                 $this->debugLog('SnowflakeService: Waiting before retry', [
                     'delay_ms' => $delayMs,
                     'next_attempt' => $attempt + 1,
+                    'rate_limited' => $isRateLimited,
                 ]);
 
                 usleep($delayMs * 1000);
             }
         }
 
-        return null;
+        throw new SnowflakeApiException('Partition fetch retry loop exited without result or exception');
+    }
+
+    /**
+     * Whether the error indicates Snowflake SQL API cloud-service throttling (safe to retry with backoff).
+     */
+    private function isRetryableSqlApiRateLimitError(string $message, int $code): bool
+    {
+        if ($code === 429) {
+            return true;
+        }
+
+        return str_contains(strtolower($message), 'request rate exceeds max');
+    }
+
+    /**
+     * Exponential backoff: SQL API rate limits use 2s initial delay per Snowflake guidance; other transient errors use 500ms.
+     *
+     * @param  int  $attempt  1-based attempt index (same as partition retry loop)
+     */
+    private function sqlApiRetryDelayMs(int $attempt, bool $rateLimited): int
+    {
+        $baseMs = $rateLimited ? self::SQL_API_RATE_LIMIT_INITIAL_DELAY_MS : 500;
+
+        return (int) ($baseMs * (2 ** ($attempt - 1)));
     }
 
     /**
@@ -733,6 +767,7 @@ class SnowflakeService
      *
      * Transient errors include:
      * - HTTP 5xx errors (server-side failures)
+     * - HTTP 429 / SQL API "request rate exceeds max" throttling
      * - Connection reset/timeout errors
      * - Specific Snowflake maintenance errors
      *
@@ -742,6 +777,10 @@ class SnowflakeService
      */
     private function isTransientError(string $errorMessage, int $errorCode = 0): bool
     {
+        if ($this->isRetryableSqlApiRateLimitError($errorMessage, $errorCode)) {
+            return true;
+        }
+
         // HTTP 5xx errors are transient
         if ($errorCode >= 500 && $errorCode < 600) {
             return true;
@@ -1008,19 +1047,40 @@ class SnowflakeService
             'url' => $url,
         ]);
 
-        try {
-            $options['headers'] = $this->getHeaders();
+        $options['headers'] = $this->getHeaders();
 
-            $response = $this->getHttpClient()->request($method, $url, $options);
+        for ($attempt = 1; $attempt <= self::SQL_API_RATE_LIMIT_MAX_ATTEMPTS; $attempt++) {
+            try {
+                $response = $this->getHttpClient()->request($method, $url, $options);
 
-            return $this->toArray($response);
-        } catch (Exception $e) {
-            $this->handleError($e, 'Error making request', [
-                'method' => $method,
-                'url' => $url,
-            ]);
-            throw $e;
+                return $this->toArray($response);
+            } catch (Exception $e) {
+                $rateLimited = $this->isRetryableSqlApiRateLimitError($e->getMessage(), $e->getCode());
+
+                if (! $rateLimited || $attempt >= self::SQL_API_RATE_LIMIT_MAX_ATTEMPTS) {
+                    $this->handleError($e, 'Error making request', [
+                        'method' => $method,
+                        'url' => $url,
+                    ]);
+                    throw $e;
+                }
+
+                $delayMs = $this->sqlApiRetryDelayMs($attempt, true);
+                $this->debugLog('SnowflakeService: SQL API rate limit on request, retrying after backoff', [
+                    'attempt' => $attempt,
+                    'max_attempts' => self::SQL_API_RATE_LIMIT_MAX_ATTEMPTS,
+                    'delay_ms' => $delayMs,
+                    'method' => $method,
+                    'url' => $url,
+                ]);
+
+                usleep($delayMs * 1000);
+                $options['headers'] = $this->getHeaders();
+            }
         }
+
+        // Unreachable — loop always returns or throws
+        throw new SnowflakeApiException('SQL API request failed after rate-limit retries');
     }
 
     /**
