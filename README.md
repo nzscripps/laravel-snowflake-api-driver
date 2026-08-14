@@ -29,6 +29,7 @@ Add the following configuration to your `config/database.php` file:
         'schema' => env('SNOWFLAKE_SCHEMA'),
         'timeout' => env('SNOWFLAKE_TIMEOUT', 30),
         'cache_driver' => env('SNOWFLAKE_CACHE_DRIVER'),
+        'quote_identifiers' => env('SNOWFLAKE_QUOTE_IDENTIFIERS', false),
     ],
 ],
 ```
@@ -48,9 +49,47 @@ SNOWFLAKE_SCHEMA=your-snowflake-schema
 SNOWFLAKE_TIMEOUT=30
 SNOWFLAKE_CACHE_DRIVER=redis
 SNOWFLAKE_COLUMNS_CASE_SENSITIVE=false
+SNOWFLAKE_QUOTE_IDENTIFIERS=false
 ```
 
 `cache_driver` is optional. When set, Snowflake token caching and lock coordination use that Laravel cache store instead of the app-wide `cache.default`.
+
+### Quoted identifiers (`quote_identifiers`)
+
+Off by default. When enabled, the query grammar emits **aliases** as double-quoted
+Snowflake identifiers:
+
+| Builder call | `quote_identifiers` off (default) | on |
+| --- | --- | --- |
+| `->select(['DEMO_MAPPING as Demo'])` | `select DEMO_MAPPING as Demo` | `select DEMO_MAPPING as "Demo"` |
+| `->from('orders as o')` | `from ORDERS as 'O'` | `from ORDERS as "O"` |
+
+Two things change as a result:
+
+1. **Alias case survives the round trip.** Snowflake folds unquoted identifiers to
+   upper case, so `as Demo` comes back as `DEMO` in
+   `resultSetMetaData.rowType` — and therefore as an UPPERCASE array key. Quoting
+   the alias makes the hydrated key exactly `Demo`.
+2. **Table aliases become identifiers instead of string literals.** `as 'O'` is
+   Snowflake *string literal* syntax; it is tolerated in a `FROM` clause but is not
+   what you meant. With the flag on you no longer need `DB::raw()` to work around
+   alias quoting on table names.
+
+Only alias positions change. Column *references* are still emitted unquoted in both
+states, because Snowflake stores unquoted identifiers upper-cased — quoting
+`order_number` as `"order_number"` would stop resolving. Raw expressions
+(`selectRaw`, `DB::raw`) are never rewritten; quote aliases yourself inside raw SQL.
+
+> **Migration note.** Turning this on changes the array keys your application reads
+> back from aliased selects (`DEMO` becomes `Demo`). Sweep any code that indexes
+> result rows by literal UPPERCASE alias keys before enabling it. The flag is
+> per-connection, so you can roll it out one connection at a time.
+
+`quote_identifiers` is deliberately separate from `SNOWFLAKE_COLUMNS_CASE_SENSITIVE`,
+which controls whether *table names* are upper-cased on the way out. Note that with
+`SNOWFLAKE_COLUMNS_CASE_SENSITIVE=true` a lower-case table alias is emitted quoted
+and exact-case (`as "o"`) while unqualified references to it still fold to `O`; use
+matching case in that combination.
 
 ## Usage
 

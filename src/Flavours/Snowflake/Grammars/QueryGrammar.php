@@ -32,6 +32,22 @@ class QueryGrammar extends Grammar
     protected $tablePrefix = '';
 
     /**
+     * Explicit override for the `quote_identifiers` connection setting.
+     *
+     * Null means "resolve from the connection config, then the environment".
+     *
+     * @var bool|null
+     */
+    protected $quoteIdentifiers = null;
+
+    /**
+     * Memoised result of resolving the setting from config / environment.
+     *
+     * @var bool|null
+     */
+    protected $resolvedQuoteIdentifiers = null;
+
+    /**
      * Create a new query grammar instance.
      *
      * @param \Illuminate\Database\Connection|null $connection
@@ -56,6 +72,7 @@ class QueryGrammar extends Grammar
     public function setConnection($connection)
     {
         $this->connection = $connection;
+        $this->resolvedQuoteIdentifiers = null;
 
         return $this;
     }
@@ -130,6 +147,57 @@ class QueryGrammar extends Grammar
     }
 
     /**
+     * Override the `quote_identifiers` connection setting for this grammar.
+     *
+     * Pass null to fall back to the connection config / environment again.
+     *
+     * @param bool|null $quoteIdentifiers
+     * @return $this
+     */
+    public function setQuoteIdentifiers($quoteIdentifiers)
+    {
+        $this->quoteIdentifiers = $quoteIdentifiers === null ? null : (bool) $quoteIdentifiers;
+        $this->resolvedQuoteIdentifiers = null;
+
+        return $this;
+    }
+
+    /**
+     * Whether aliases are emitted as double-quoted Snowflake identifiers.
+     *
+     * Resolution order: explicit override, then the connection's
+     * `quote_identifiers` config value, then SNOWFLAKE_QUOTE_IDENTIFIERS.
+     * Defaults to false so existing consumers compile byte-identical SQL.
+     *
+     * @return bool
+     */
+    public function quotesIdentifiers(): bool
+    {
+        if ($this->quoteIdentifiers !== null) {
+            return $this->quoteIdentifiers;
+        }
+
+        if ($this->resolvedQuoteIdentifiers !== null) {
+            return $this->resolvedQuoteIdentifiers;
+        }
+
+        if ($this->connection && method_exists($this->connection, 'getConfig')) {
+            $configured = $this->connection->getConfig('quote_identifiers');
+
+            if ($configured !== null) {
+                return $this->resolvedQuoteIdentifiers = filter_var($configured, FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+
+        // env() returns null under config:cache, so production consumers must set
+        // `quote_identifiers` on the connection; this is a local/dev convenience.
+        return $this->resolvedQuoteIdentifiers = filter_var(
+            env('SNOWFLAKE_QUOTE_IDENTIFIERS', false),
+            FILTER_VALIDATE_BOOLEAN
+        );
+    }
+
+    /**
      * Convert an array of column names into a delimited string.
      *
      * @return string
@@ -137,7 +205,64 @@ class QueryGrammar extends Grammar
     public function columnize(array $columns)
     {
         $this->debugLog('columnize', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
-        return implode(', ', array_map([$this, 'wrapColumn'], $columns));
+        return implode(', ', array_map([$this, 'wrapSelectColumn'], $columns));
+    }
+
+    /**
+     * Wrap a single select column, quoting a trailing alias when enabled.
+     *
+     * Base Laravel routes columnize() through wrap(), which detects " as " and
+     * quotes the alias via wrapValue(). This grammar historically called
+     * wrapColumn() directly, so aliases reached Snowflake unquoted and came back
+     * upper-cased in resultSetMetaData.rowType. With `quote_identifiers` on we
+     * restore alias-aware wrapping, but only for the alias: the expression to the
+     * left keeps today's treatment, because unquoted column references resolve
+     * case-insensitively in Snowflake while quoted ones would not.
+     *
+     * @param mixed $column
+     * @return string
+     */
+    protected function wrapSelectColumn($column)
+    {
+        if (! $this->quotesIdentifiers() || ! is_string($column)) {
+            return $this->wrapColumn($column);
+        }
+
+        $alias = $this->extractTrailingAlias($column);
+
+        if ($alias === null) {
+            return $this->wrapColumn($column);
+        }
+
+        [$expression, $identifier] = $alias;
+
+        return $this->wrapColumn($expression) . ' as ' . $this->wrapValue($identifier);
+    }
+
+    /**
+     * Split "<expression> as <alias>" into its two parts.
+     *
+     * Deliberately conservative: the alias must be the trailing token and must be
+     * a bare identifier (optionally already double-quoted). Anything else — a
+     * PIVOT column, a string literal containing " as ", a function call with no
+     * alias — is left for wrapColumn() to handle exactly as before.
+     *
+     * @param string $column
+     * @return array{0: string, 1: string}|null
+     */
+    protected function extractTrailingAlias($column)
+    {
+        if (! preg_match('/^(?<expression>.*\S)\s+as\s+(?<alias>"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)$/i', $column, $matches)) {
+            return null;
+        }
+
+        $alias = $matches['alias'];
+
+        if (strlen($alias) > 1 && $alias[0] === '"') {
+            $alias = substr($alias, 1, -1);
+        }
+
+        return [$matches['expression'], $alias];
     }
 
     /**
@@ -249,11 +374,21 @@ class QueryGrammar extends Grammar
     protected function wrapValue($value)
     {
         $this->debugLog('wrapValue', ['value' => $value, 'file' => __FILE__, 'line' => __LINE__]);
-        if ('*' !== $value) {
-            return "'".str_replace("'", "''", $value)."'";
+
+        if ('*' === $value) {
+            return $value;
         }
 
-        return $value;
+        // wrapValue is only reached for alias positions here (wrapSelectColumn and
+        // the base wrapAliasedValue/wrapAliasedTable path), because wrapSegments()
+        // routes plain identifiers to wrapColumn(). Single quotes make Snowflake
+        // read the alias as a string literal rather than an identifier; double
+        // quotes are the correct identifier syntax and preserve case.
+        if ($this->quotesIdentifiers()) {
+            return '"'.str_replace('"', '""', $value).'"';
+        }
+
+        return "'".str_replace("'", "''", $value)."'";
     }
 
     /**

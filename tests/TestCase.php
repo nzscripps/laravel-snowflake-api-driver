@@ -64,6 +64,38 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
+     * Run a callback with an environment variable forced to a value, or unset
+     * when null, restoring the previous state afterwards.
+     *
+     * Tests that assert on flag defaults must not depend on the ambient
+     * environment of the process running them.
+     */
+    protected function withEnv(string $key, ?string $value, callable $callback): void
+    {
+        $previous = $_SERVER[$key] ?? null;
+
+        $apply = function (?string $set) use ($key) {
+            if ($set === null) {
+                unset($_ENV[$key], $_SERVER[$key]);
+                putenv($key);
+
+                return;
+            }
+
+            $_ENV[$key] = $set;
+            $_SERVER[$key] = $set;
+            putenv("$key=$set");
+        };
+
+        try {
+            $apply($value);
+            $callback();
+        } finally {
+            $apply($previous === null ? null : (string) $previous);
+        }
+    }
+
+    /**
      * Set a protected property on an object using reflection
      *
      * @param  object  $object  The object to set the property on
