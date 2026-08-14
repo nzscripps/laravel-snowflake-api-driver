@@ -152,6 +152,32 @@ class QuoteIdentifiersGrammarTest extends TestCase
         );
     }
 
+    public function test_trailing_whitespace_after_an_alias_is_not_silently_dropped(): void
+    {
+        // PCRE's $ matches before a trailing newline; using it here would emit
+        // `X as "Foo"` and lose the newline, so flag-on output would differ from
+        // flag-off by more than the quoting.
+        $query = $this->query()->from('orders')->select(["MPLUS_DEMO_MAPPING as Demo\n"]);
+
+        $this->assertSame("select MPLUS_DEMO_MAPPING as Demo\n from ORDERS", $query->toSql());
+    }
+
+    public function test_alias_extraction_does_not_backtrack_catastrophically(): void
+    {
+        $grammar = $this->grammar(true);
+        $method = new \ReflectionMethod(QueryGrammar::class, 'extractTrailingAlias');
+        $method->setAccessible(true);
+
+        $pathological = str_repeat('a as ', 5000).'!';
+
+        $start = hrtime(true);
+        $result = $method->invoke($grammar, $pathological);
+        $elapsedMs = (hrtime(true) - $start) / 1e6;
+
+        $this->assertNull($result);
+        $this->assertLessThan(250, $elapsedMs, 'extractTrailingAlias regex backtracks superlinearly');
+    }
+
     public function test_predicates_groups_and_orders_are_untouched_when_flag_is_on(): void
     {
         $query = $this->query()
@@ -163,6 +189,79 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
         $this->assertSame(
             'select A as "B" from ORDERS where Mixed_Col = ? group by Mixed_Col order by Mixed_Col asc',
+            $query->toSql()
+        );
+    }
+
+    public function test_alias_references_are_not_quoted_so_aliases_must_be_upper_case(): void
+    {
+        // The grammar cannot tell an alias reference from a column reference, so
+        // group by / having / order by emit the name unquoted. A mixed-case alias
+        // therefore does NOT round-trip to its own reference: `order by Total`
+        // folds to TOTAL while the alias is exactly "Total". Callers must spell
+        // aliases UPPER CASE for any alias they intend to reference.
+        $query = $this->query()
+            ->from('orders')
+            ->select(['SUM(x) as Total'])
+            ->groupBy('a')
+            ->orderBy('Total');
+
+        $this->assertSame(
+            'select SUM(x) as "Total" from ORDERS group by a order by Total asc',
+            $query->toSql()
+        );
+    }
+
+    public function test_sub_select_aliases_are_not_quoted(): void
+    {
+        // selectSub routes its alias through wrap() rather than the select-column
+        // path, so it is NOT quoted. Documented, not fixed: wrap() cannot
+        // distinguish an alias from a column without breaking plain columns.
+        $query = $this->query()
+            ->from('orders')
+            ->selectSub(function ($query): void {
+                $query->from('order_lines')->selectRaw('count(*)');
+            }, 'MyCount');
+
+        $this->assertStringContainsString('as MyCount', $query->toSql());
+        $this->assertStringNotContainsString('as "MyCount"', $query->toSql());
+    }
+
+    public function test_unicode_aliases_are_quoted_like_ascii_ones(): void
+    {
+        $query = $this->query()->from('orders')->select(['MPLUS_DEMO_MAPPING as Démo']);
+
+        $this->assertSame('select MPLUS_DEMO_MAPPING as "Démo" from ORDERS', $query->toSql());
+    }
+
+    public function test_a_trailing_space_after_the_alias_leaves_the_column_untouched(): void
+    {
+        $query = $this->query()->from('orders')->select(['MPLUS_DEMO_MAPPING as Demo ']);
+
+        // Fail-safe: unmatched input keeps today's exact output rather than
+        // guessing where the alias ends.
+        $this->assertSame('select MPLUS_DEMO_MAPPING as Demo  from ORDERS', $query->toSql());
+    }
+
+    public function test_insert_and_upsert_column_names_are_never_treated_as_aliases(): void
+    {
+        // columnize() is shared with DML; only compileColumns() does alias
+        // quoting, so a column literally named "x as y" stays a column name.
+        $grammar = $this->grammar(true);
+        $builder = $this->query()->from('orders');
+
+        $sql = $grammar->compileInsert($builder, [['id' => 1, 'x as y' => 2]]);
+
+        $this->assertStringContainsString('(id, x as y)', $sql);
+        $this->assertStringNotContainsString('as "y"', $sql);
+    }
+
+    public function test_group_by_column_lists_are_not_alias_quoted(): void
+    {
+        $query = $this->query()->from('orders')->select(['A as B'])->groupBy('C as D');
+
+        $this->assertSame(
+            'select A as "B" from ORDERS group by C as D',
             $query->toSql()
         );
     }
@@ -229,6 +328,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
         $connection = Mockery::mock(Connection::class);
         $connection->shouldReceive('getName')->andReturn('snowflake_api')->byDefault();
         $connection->shouldReceive('getTablePrefix')->andReturn('')->byDefault();
+        $connection->shouldReceive('getDatabaseName')->andReturn('SFDVDH')->byDefault();
         $connection->shouldReceive('getConfig')->with('quote_identifiers')->andReturn($quoteIdentifiers)->byDefault();
 
         return $connection;

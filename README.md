@@ -75,15 +75,45 @@ Two things change as a result:
    what you meant. With the flag on you no longer need `DB::raw()` to work around
    alias quoting on table names.
 
-Only alias positions change. Column *references* are still emitted unquoted in both
-states, because Snowflake stores unquoted identifiers upper-cased — quoting
-`order_number` as `"order_number"` would stop resolving. Raw expressions
-(`selectRaw`, `DB::raw`) are never rewritten; quote aliases yourself inside raw SQL.
+#### Exactly what changes, and what does not
+
+Only aliases in a SELECT column list, and table aliases, are quoted. Everything
+else is emitted exactly as before, in both flag states:
+
+| Position | Quoted with the flag on? |
+| --- | --- |
+| `->select(['X as Demo'])` | **yes** — `X as "Demo"` |
+| `->from('t as x')`, `->join('t as x', …)` | **yes** — and the alias is upper-cased first by `resolveTableName()` |
+| Column *references* (`->where`, `->orderBy`, `->groupBy`, `->having`) | no |
+| `->selectSub($q, 'MyCount')`, `->fromSub`, `->joinSub` | no — these route through `wrap()`, which cannot tell an alias from a column |
+| `selectRaw` / `DB::raw(...)` | no — raw expressions are never rewritten |
+| Insert/upsert/truncate column lists, `groupBy` lists | no — only SELECT column lists get alias handling |
+
+> **Write your aliases in UPPER CASE if anything references them.**
+> Because references are not quoted, a mixed-case alias does not round-trip to its
+> own reference: `->select(['SUM(x) as Total'])->orderBy('Total')` compiles to
+> `select SUM(x) as "Total" … order by Total`, and Snowflake folds the unquoted
+> `Total` to `TOTAL` → **invalid identifier**. The same applies to an outer query
+> referencing an alias defined in a subquery. An UPPERCASE alias is the one
+> spelling that yields the same identifier in both flag states.
+
+Aliases the pattern deliberately does not touch (left byte-identical to today, so
+they stay unquoted and keep folding): aliases with a trailing space, aliases
+containing an escaped quote (`x as "a""b"`), and anything where the trailing token
+is not a bare identifier. Whitespace between the expression and `as` is
+normalised to a single space when the alias IS quoted.
 
 > **Migration note.** Turning this on changes the array keys your application reads
-> back from aliased selects (`DEMO` becomes `Demo`). Sweep any code that indexes
-> result rows by literal UPPERCASE alias keys before enabling it. The flag is
-> per-connection, so you can roll it out one connection at a time.
+> back from aliased selects (`DEMO` becomes `Demo`). Before enabling it, sweep code
+> that reads rows by literal UPPERCASE keys — note that `CaseInsensitiveRow`
+> already tolerates either casing for array/property reads, so the surfaces that
+> actually break are `toArray()`/`jsonSerialize()` output (API payloads) and
+> Eloquent attribute access, which is case-sensitive.
+>
+> The flag is read per-connection, but the `SNOWFLAKE_QUOTE_IDENTIFIERS` fallback
+> applies to any connection that does not set `quote_identifiers` explicitly. To
+> roll out one connection at a time, set the key explicitly on every Snowflake
+> connection and leave the env var unset.
 
 `quote_identifiers` is deliberately separate from `SNOWFLAKE_COLUMNS_CASE_SENSITIVE`,
 which controls whether *table names* are upper-cased on the way out. Note that with

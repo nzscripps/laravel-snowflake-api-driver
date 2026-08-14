@@ -205,7 +205,30 @@ class QueryGrammar extends Grammar
     public function columnize(array $columns)
     {
         $this->debugLog('columnize', ['columns' => $columns, 'file' => __FILE__, 'line' => __LINE__]);
-        return implode(', ', array_map([$this, 'wrapSelectColumn'], $columns));
+        return implode(', ', array_map([$this, 'wrapColumn'], $columns));
+    }
+
+    /**
+     * Compile the "select *" portion of the query.
+     *
+     * Overridden so alias quoting applies to SELECT column lists ONLY. columnize()
+     * is shared with compileInsert/compileUpsert/compileTruncate/compileGroups,
+     * where the strings are column NAMES rather than aliases and must never be
+     * rewritten.
+     *
+     * @param \Illuminate\Database\Query\Builder $query
+     * @param array $columns
+     * @return string|null
+     */
+    protected function compileColumns(Builder $query, $columns)
+    {
+        if (! is_null($query->aggregate)) {
+            return null;
+        }
+
+        $select = $query->distinct ? 'select distinct ' : 'select ';
+
+        return $select . implode(', ', array_map([$this, 'wrapSelectColumn'], $columns));
     }
 
     /**
@@ -245,14 +268,23 @@ class QueryGrammar extends Grammar
      * Deliberately conservative: the alias must be the trailing token and must be
      * a bare identifier (optionally already double-quoted). Anything else — a
      * PIVOT column, a string literal containing " as ", a function call with no
-     * alias — is left for wrapColumn() to handle exactly as before.
+     * alias, an alias with an embedded escaped quote (`"a""b"`), a trailing space
+     * — is left for wrapColumn() to handle exactly as before. Unmatched input is
+     * therefore never MORE quoted than today, only ever less.
      *
      * @param string $column
      * @return array{0: string, 1: string}|null
      */
     protected function extractTrailingAlias($column)
     {
-        if (! preg_match('/^(?<expression>.*\S)\s+as\s+(?<alias>"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)$/i', $column, $matches)) {
+        // \z, not $: PCRE's $ also matches before a trailing newline, which would
+        // silently drop that newline from the emitted SQL and make the flag-on
+        // output differ from flag-off by more than the quoting.
+        // /u so mixed-case unicode aliases quote like ASCII ones; on invalid UTF-8
+        // preg_match returns false, which falls through to the unchanged path.
+        $pattern = '/^(?<expression>.*\S)\s+as\s+(?<alias>"[^"]+"|[\p{L}_][\p{L}\p{N}_$]*)\z/iu';
+
+        if (! preg_match($pattern, $column, $matches)) {
             return null;
         }
 
@@ -384,6 +416,10 @@ class QueryGrammar extends Grammar
         // routes plain identifiers to wrapColumn(). Single quotes make Snowflake
         // read the alias as a string literal rather than an identifier; double
         // quotes are the correct identifier syntax and preserve case.
+        //
+        // NOT a sanitisation boundary: wrapColumn() still strips double quotes
+        // from column expressions in both flag states, so callers remain
+        // responsible for not feeding untrusted text into select()/from().
         if ($this->quotesIdentifiers()) {
             return '"'.str_replace('"', '""', $value).'"';
         }
