@@ -134,6 +134,23 @@ class ResultTest extends TestCase
     }
 
     /** @test */
+    public function it_sets_and_gets_stats()
+    {
+        // Arrange & Act
+        $stats = ['numRowsInserted' => 0, 'numRowsUpdated' => 2, 'numRowsDeleted' => 0];
+        $this->result->setStats($stats);
+
+        // Assert
+        $this->assertSame($stats, $this->result->getStats());
+    }
+
+    /** @test */
+    public function it_defaults_stats_to_null()
+    {
+        $this->assertNull($this->result->getStats());
+    }
+
+    /** @test */
     public function it_converts_to_collection()
     {
         // Arrange

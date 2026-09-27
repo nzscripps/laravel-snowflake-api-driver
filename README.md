@@ -152,6 +152,52 @@ $results = DB::connection('snowflake_api')
     ->select('SELECT * FROM your_table WHERE condition = ?', ['value']);
 ```
 
+### DML row counts and unknown outcomes
+
+`statement()`, `update()`, `insert()`, and `delete()` are unchanged: they only
+report whether the request completed, never a trustworthy row count (this
+driver has no PDO statement to read `rowCount()` from).
+
+For a single conditional DML statement — typically an optimistic-concurrency
+write like `UPDATE t SET ..., WRITE_VERSION = WRITE_VERSION + 1 WHERE id = ?
+AND WRITE_VERSION = ?` — where the caller actually needs to know how many
+rows changed, use `affectingStatement()` (returns the total as an `int`, like
+Laravel's own PDO-backed drivers) or `dmlStatement()` (returns a
+`LaravelSnowflakeApi\Services\DmlResult` with `getInserted()`/`getUpdated()`/
+`getDeleted()`/`affectedRows()`):
+
+```php
+$affected = DB::connection('snowflake_api')->affectingStatement(
+    'UPDATE t SET x = ?, WRITE_VERSION = WRITE_VERSION + 1 WHERE id = ? AND WRITE_VERSION = ?',
+    [$newValue, $id, $expectedVersion]
+);
+
+if ($affected === 0) {
+    // Someone else already changed this row — the WRITE_VERSION precondition failed.
+}
+
+$result = DB::connection('snowflake_api')->dmlStatement($sql, $bindings);
+$result->getUpdated();   // int
+$result->affectedRows(); // int, sum of inserted+updated+deleted
+```
+
+Both read Snowflake's own reported counts — preferring the response's `stats`
+object, falling back to the statement's documented output row (e.g. "number
+of rows updated") — and never guess.
+
+**Unknown outcomes.** Both methods can throw
+`LaravelSnowflakeApi\Exceptions\StatementOutcomeUnknownException` (surfaced by
+Laravel as a `QueryException` whose `getPrevious()` is this exception) when
+the statement was submitted to Snowflake but whether it completed could not
+be confirmed — for example a transport failure while polling for the result,
+or the driver's own timeout cancelling a statement that may have already
+committed. This is distinct from Snowflake actively *refusing* the statement
+(an HTTP 4xx SQL error): a refusal means nothing ran and the original
+exception propagates unchanged. An unknown outcome means the statement **may
+or may not have executed** — callers must treat it as a possible partial
+success (typically by re-checking state) and must never assume it is safe to
+blindly retry, since the statement's own fate is still unconfirmed.
+
 ## Features
 
 - Uses Snowflake REST API for communication

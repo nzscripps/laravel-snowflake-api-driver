@@ -9,11 +9,13 @@ use Illuminate\Database\Query\Grammars\Grammar as QueryGrammarContract;
 use Illuminate\Database\Query\Processors\Processor;
 use Illuminate\Database\Schema\Grammars\Grammar as SchemaGrammarContract;
 use Illuminate\Support\Facades\Log;
+use LaravelSnowflakeApi\Exceptions\StatementOutcomeUnknownException;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\SchemaGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Processor as SnowflakeProcessor;
 use LaravelSnowflakeApi\Flavours\Snowflake\SnowflakeQueryBuilder;
 use LaravelSnowflakeApi\Services\CaseInsensitiveRow;
+use LaravelSnowflakeApi\Services\DmlResult;
 use LaravelSnowflakeApi\Services\SnowflakeService;
 use LaravelSnowflakeApi\Services\ThreadSafeTokenProvider;
 use LaravelSnowflakeApi\Traits\DebugLogging;
@@ -538,6 +540,114 @@ class SnowflakeApiConnection extends Connection
         } catch (Exception $e) {
             Log::error('SnowflakeApiConnection: Error executing delete statement', [
                 'query' => $query,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Run a DML statement (INSERT/UPDATE/DELETE/MERGE) and return the number
+     * of rows it changed, using Snowflake's own reported counts — this
+     * driver has no PDO statement handle to read a row count from.
+     *
+     * Unlike statement()/update()/delete() (unchanged, and still reporting
+     * only "the request completed"), this can throw
+     * {@see StatementOutcomeUnknownException} (wrapped by Laravel in a
+     * QueryException) when the statement's outcome could not be confirmed.
+     * Callers making a conditional write (e.g. an optimistic-concurrency
+     * `UPDATE ... WHERE WRITE_VERSION = ?`) must treat that as "may have
+     * committed" and re-check state — never as a guaranteed no-op.
+     *
+     * @param  string  $query
+     * @param  array  $bindings
+     *
+     * @throws StatementOutcomeUnknownException
+     */
+    public function affectingStatement($query, $bindings = []): int
+    {
+        $this->debugLog('SnowflakeApiConnection: Executing affecting statement', [
+            'query' => $query,
+            'bindings_count' => count($bindings),
+        ]);
+
+        return $this->run($query, $bindings, function ($query, $bindings) {
+            if ($this->pretending()) {
+                $this->debugLog('SnowflakeApiConnection: Pretending to run affecting statement');
+
+                return 0;
+            }
+
+            return $this->executeDmlStatement($query, $bindings)->affectedRows();
+        });
+    }
+
+    /**
+     * Run a DML statement (INSERT/UPDATE/DELETE/MERGE) and return the full
+     * per-operation row counts Snowflake reports, rather than just the sum
+     * affectingStatement() returns.
+     *
+     * Same path as affectingStatement() (same pretending()/binding handling,
+     * same {@see StatementOutcomeUnknownException} contract) — the two share
+     * a single execution core so each still passes through exactly one
+     * $this->run() layer; see executeDmlStatement().
+     *
+     * @param  string  $query
+     * @param  array  $bindings
+     *
+     * @throws StatementOutcomeUnknownException
+     */
+    public function dmlStatement($query, $bindings = []): DmlResult
+    {
+        $this->debugLog('SnowflakeApiConnection: Executing DML statement', [
+            'query' => $query,
+            'bindings_count' => count($bindings),
+        ]);
+
+        return $this->run($query, $bindings, function ($query, $bindings) {
+            if ($this->pretending()) {
+                $this->debugLog('SnowflakeApiConnection: Pretending to run DML statement');
+
+                return new DmlResult(0, 0, 0);
+            }
+
+            return $this->executeDmlStatement($query, $bindings);
+        });
+    }
+
+    /**
+     * Shared DML execution core for affectingStatement()/dmlStatement().
+     *
+     * Deliberately NOT wrapped in $this->run() itself — both public methods
+     * already provide their own single run()/QueryException layer, and
+     * calling one from the other here would nest a second QueryException
+     * around the first, so a StatementOutcomeUnknownException would no
+     * longer be exactly one level down via getPrevious().
+     *
+     * @param  string  $query
+     */
+    private function executeDmlStatement($query, array $bindings): DmlResult
+    {
+        try {
+            $statement = $this->prepareQuery($query, $bindings);
+
+            $this->debugLog('SnowflakeApiConnection: Executing DML statement via SnowflakeService', [
+                'prepared_query' => $statement,
+            ]);
+
+            $result = $this->snowflakeService->executeDml($statement);
+
+            $this->debugLog('SnowflakeApiConnection: DML statement executed successfully', [
+                'inserted' => $result->getInserted(),
+                'updated' => $result->getUpdated(),
+                'deleted' => $result->getDeleted(),
+            ]);
+
+            return $result;
+        } catch (Exception $e) {
+            Log::error('SnowflakeApiConnection: Error executing DML statement', [
+                'query' => $statement ?? $query,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);

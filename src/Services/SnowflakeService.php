@@ -10,10 +10,12 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use LaravelSnowflakeApi\Exceptions\SnowflakeApiException;
+use LaravelSnowflakeApi\Exceptions\StatementOutcomeUnknownException;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 use Symfony\Component\HttpClient\Exception\JsonException;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Contracts\HttpClient\ResponseInterface;
+use Throwable;
 
 class SnowflakeService
 {
@@ -325,6 +327,88 @@ class SnowflakeService
             $this->handleError($e, 'Error executing cursor query', ['query' => $query]);
             throw $e;
         }
+    }
+
+    /**
+     * Execute a single DML statement (INSERT/UPDATE/DELETE/MERGE) and return
+     * the rows Snowflake reports it changed.
+     *
+     * Unlike ExecuteQuery()/executeQueryMapped(), which treat any completed
+     * request as a success, this distinguishes three outcomes:
+     *  - Snowflake answered and RAN the statement: returns a DmlResult built
+     *    from the response's `stats` object or its output row — see
+     *    {@see DmlResult::fromResult()}.
+     *  - Snowflake answered and REFUSED the statement (an HTTP 4xx: a SQL
+     *    error, or the SQL API's 429 rate limiter rejecting the request
+     *    before it ever ran): the original exception propagates unchanged,
+     *    since nothing executed.
+     *  - Anything else — a transport failure while submitting or polling, an
+     *    HTTP 5xx, or waitForStatement()'s own timeout-cancel path — means we
+     *    cannot tell whether the statement executed. That is reported as
+     *    {@see StatementOutcomeUnknownException} rather than guessed at
+     *    either way; a cancelled statement racing the statement's own commit
+     *    is a known trap, so a cancel is never treated as proof of "nothing
+     *    ran".
+     *
+     * @param  string  $statement  The DML statement to execute
+     * @return DmlResult The rows inserted/updated/deleted
+     *
+     * @throws StatementOutcomeUnknownException If the outcome could not be confirmed
+     */
+    public function executeDml(string $statement): DmlResult
+    {
+        $this->debugLog('SnowflakeService: Executing DML statement', [
+            'statement' => $statement,
+        ]);
+
+        try {
+            $statementId = $this->postStatement($statement);
+        } catch (Throwable $e) {
+            if ($this->refusedBeforeExecution($e)) {
+                throw $e;
+            }
+
+            throw StatementOutcomeUnknownException::whileSubmitting($e);
+        }
+
+        try {
+            $result = $this->waitForStatement($statementId);
+        } catch (Throwable $e) {
+            if ($this->refusedBeforeExecution($e)) {
+                throw $e;
+            }
+
+            throw StatementOutcomeUnknownException::whileWaiting($statementId, $e);
+        }
+
+        if (! $result->isExecuted()) {
+            // waitForStatement()'s own timeout elapsed and it cancelled the
+            // statement on our behalf. The cancel call can race the
+            // statement's own commit, so this is never proof nothing ran.
+            throw StatementOutcomeUnknownException::afterCancel($statementId);
+        }
+
+        return DmlResult::fromResult($result);
+    }
+
+    /**
+     * Whether an exception's code is an HTTP 4xx Snowflake API response.
+     *
+     * A 4xx means Snowflake's SQL API answered the request and refused it
+     * before anything executed: {@see toArray()}'s `$statusCode >= 400`
+     * branch, and the 429 SQL-API-rate-limit retries in {@see makeRequest()},
+     * both set the thrown exception's code to that HTTP status. Any other
+     * code — 0 for a transport failure that never reached Snowflake (see
+     * {@see toArray()}'s "Response body is empty" JsonException), or a 5xx —
+     * means the request's fate is unknown: it may have reached Snowflake and
+     * executed before the failure occurred, so it is never safe to assume
+     * "nothing ran".
+     */
+    private function refusedBeforeExecution(Throwable $e): bool
+    {
+        $code = (int) $e->getCode();
+
+        return $code >= 400 && $code < 500;
     }
 
     private function executeQueryResult(string $query): Result
@@ -922,6 +1006,7 @@ class SnowflakeService
         $result->setFields($data['resultSetMetaData']['rowType']);
         $result->setData($data['data']);
         $result->setTimestamp($data['createdOn']);
+        $result->setStats($data['stats'] ?? null);
 
         return $result;
     }

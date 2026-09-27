@@ -27,6 +27,8 @@ class Result
 
     private $timestamp;
 
+    private $stats;
+
     private $service;
 
     public function __construct($service = null)
@@ -169,6 +171,32 @@ class Result
     public function getTimestamp()
     {
         return $this->timestamp;
+    }
+
+    /**
+     * Set the DML `stats` object from the SQL API response (e.g.
+     * numRowsInserted/numRowsUpdated/numRowsDeleted). Null when the response
+     * carried none — a SELECT, or an unexecuted/cancelled statement.
+     *
+     * @param  array|null  $stats
+     * @return $this
+     */
+    public function setStats($stats)
+    {
+        $this->debugLog('Result: Setting stats', [
+            'has_stats' => $stats !== null,
+        ]);
+        $this->stats = $stats;
+
+        return $this;
+    }
+
+    /**
+     * @return array|null
+     */
+    public function getStats()
+    {
+        return $this->stats;
     }
 
     public function getPaginationNext()
