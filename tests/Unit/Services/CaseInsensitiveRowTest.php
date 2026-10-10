@@ -182,7 +182,8 @@ class CaseInsensitiveRowTest extends TestCase
             'a:1:{s:3:"foo";s:3:"FOO";}',
         ));
 
-        $this->assertSame(['FOO' => 3, 'Foo' => 2], (array) $old);
+        // Precedence is carried by property order, so FOO moves last.
+        $this->assertEquals(['FOO' => 3, 'Foo' => 2], (array) $old);
         $this->assertSame(3, $old->foo);
         $this->assertSame(3, unserialize(serialize($old))->foo);
     }
@@ -196,6 +197,44 @@ class CaseInsensitiveRowTest extends TestCase
 
         $this->assertSame(3, $row->foo);
         $this->assertSame(3, $row['fOO']);
+    }
+
+    public function test_an_array_access_write_redirects_before_any_read(): void
+    {
+        $row = new CaseInsensitiveRow(['FOO' => 1, 'Foo' => 2]);
+
+        $row['FOO'] = 3;
+
+        $this->assertSame(3, $row->foo);
+    }
+
+    public function test_twin_precedence_survives_unrelated_unsets_and_clones(): void
+    {
+        $row = new CaseInsensitiveRow(['FOO' => 1, 'Foo' => 2, 'BAR' => 3]);
+        $row->foo;
+        $row['FOO'] = 4;
+
+        unset($row->bar);
+        $copy = clone $row;
+
+        $this->assertSame(4, $row->foo);
+        $this->assertSame(4, $copy->foo);
+        $this->assertSame(4, unserialize(serialize($row))->foo);
+    }
+
+    public function test_serializes_only_live_casings_after_an_exact_name_unset(): void
+    {
+        $row = new CaseInsensitiveRow(['FOO' => 1, 'Foo' => 2]);
+        $row->foo;   // resolves to Foo
+
+        unset($row->Foo);   // exact name: bypasses __unset
+        $payload = serialize($row);   // before any read could repair the map
+
+        $this->assertSame(
+            $this->legacyPayload('a:1:{s:3:"FOO";i:1;}', 'a:1:{s:3:"foo";s:3:"FOO";}'),
+            $payload,
+        );
+        $this->assertSame(1, $row->foo);
     }
 
     public function test_a_direct_write_to_an_existing_twin_updates_it_in_place(): void

@@ -173,7 +173,9 @@ DB::connection('snowflake_api')->table('t')->value('SPOT_COUNT'); // 7
 NULL is not set. Ask `property_exists()` with the column's own name, or
 `array_key_exists()` on `toArray()`, whether a column was selected. Writing a
 casing that matches no property adds a property with that exact name instead of
-overwriting the folded column, so both serialize.
+overwriting the folded column, so both serialize; the last casing in property
+order answers every other casing, and an ArrayAccess write moves its casing
+last.
 
 > **Upgrading from 0.12 or earlier.** Rows used to keep their columns in a private
 > array: `(array) $row`, `get_object_vars()`, `foreach`, `property_exists()` and

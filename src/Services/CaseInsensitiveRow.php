@@ -26,11 +26,12 @@ namespace LaravelSnowflakeApi\Services;
  * toArray().
  *
  * Writing a casing that matches no property adds a property with that exact
- * name; it does not overwrite the folded original, so both serialize. Reads in
- * any other casing resolve to the most recently added of them, or to the one
- * most recently written through ArrayAccess. A direct write to an existing
- * property updates it in place without moving those reads (0.12 moved them;
- * a public property write never reaches PHP magic).
+ * name; it does not overwrite the folded original, so both serialize. When
+ * several casings of one name exist, the LAST in property order answers every
+ * other casing. A new casing is added last, and an ArrayAccess write to an
+ * existing casing moves it last (as 0.12 sent other casings to the latest
+ * write). A direct property write to an existing casing updates it in place
+ * and moves nothing: PHP never routes a public property write through magic.
  *
  * Before 0.13 the columns lived in a private array: casts,
  * get_object_vars() and property_exists() saw nothing, and isset() reported
@@ -39,13 +40,23 @@ namespace LaravelSnowflakeApi\Services;
 class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSerializable
 {
     /**
-     * Per row: lowercased property name => property name, built on the first
-     * read in a casing that is not a property. Held outside the instance so
-     * that casts and get_object_vars() see only columns.
+     * Per row: lowercased name => the property that answers it. A cache
+     * derived from property order, rebuilt whenever it may be stale. Held
+     * outside the instance so that casts and get_object_vars() see only
+     * columns.
      *
      * @var \WeakMap<self, array<string, string>>|null
      */
     private static ?\WeakMap $propertyNames = null;
+
+    /**
+     * Every row of one result has the same properties: the last map built is
+     * kept with its property list, and a row with the same list shares it
+     * (copy-on-write) instead of building its own.
+     *
+     * @var array{0: list<int|string>, 1: array<string, string>}|null
+     */
+    private static ?array $lastPropertyNames = null;
 
     /**
      * @param  array<string, mixed>  $row  Column name => value
@@ -68,13 +79,19 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
     }
 
     /**
-     * Reached only when $name is not a property: add it with this exact name.
+     * Reached only when $name is not a property: add it, last, with this
+     * exact name.
      */
     public function __set(string $name, mixed $value): void
     {
         // Inside __set, PHP writes $name directly instead of recursing.
         $this->{$name} = $value;
-        $this->resolveCasingTo($name);
+
+        if (self::$propertyNames !== null && isset(self::$propertyNames[$this])) {
+            $names = self::$propertyNames[$this];
+            $names[strtolower($name)] = $name;
+            self::$propertyNames[$this] = $names;
+        }
     }
 
     /**
@@ -96,7 +113,7 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
 
         if ($property !== null) {
             unset($this->{$property});
-            self::$propertyNames?->offsetUnset($this);
+            $this->forgetPropertyNames();
         }
     }
 
@@ -120,21 +137,25 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
      * The 0.12 envelope, byte for byte: private `data` (columns) and `keyMap`
      * (lowercased name => the casing reads resolve to). A process still on
      * 0.12, during a rolling deploy or after a rollback, has no __unserialize()
-     * and maps exactly these keys onto its private arrays.
+     * and maps exactly these keys onto its private arrays, so every keyMap
+     * target must be a live column.
      *
      * @return array<string, array<string, mixed>>
      */
     public function __serialize(): array
     {
+        $this->forgetPropertyNames();
+
         return [
             "\0".self::class."\0data" => get_object_vars($this),
-            "\0".self::class."\0keyMap" => $this->names(),
+            "\0".self::class."\0keyMap" => $this->propertyNames(),
         ];
     }
 
     /**
      * Reads the 0.12 envelope (written by this version or by 0.12 itself) and,
-     * defensively, a bare column array.
+     * defensively, a bare column array. A 0.12 keyMap is honoured by moving
+     * each casing it names last.
      *
      * @param  array<string, mixed>  $data
      */
@@ -152,16 +173,10 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
             $this->{$column} = $value;
         }
 
-        if (is_array($keyMap)) {
-            $names = $this->names();
-
-            foreach ($keyMap as $lower => $property) {
-                if (is_string($property) && property_exists($this, $property)) {
-                    $names[(string) $lower] = $property;
-                }
+        foreach (is_array($keyMap) ? $keyMap : [] as $property) {
+            if (is_string($property) && property_exists($this, $property)) {
+                $this->moveLast($property);
             }
-
-            self::$propertyNames[$this] = $names;
         }
     }
 
@@ -180,10 +195,12 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
     public function offsetSet(mixed $offset, mixed $value): void
     {
         $name = (string) $offset;
+
+        if (property_exists($this, $name)) {
+            $this->moveLast($name);
+        }
+
         $this->{$name} = $value;
-        // A write to an existing property skips __set; ArrayAccess can still
-        // send other casings to it, as 0.12 did for every write.
-        $this->resolveCasingTo($name);
     }
 
     public function offsetUnset(mixed $offset): void
@@ -197,34 +214,41 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
     private function propertyFor(string $name): ?string
     {
         $lower = strtolower($name);
-        $names = $this->names();
+        $property = $this->propertyNames()[$lower] ?? null;
 
-        // A property removed by an exact-name unset() bypasses __unset, so a
-        // hit is re-checked before it is trusted.
-        if (isset($names[$lower]) && ! property_exists($this, $names[$lower])) {
-            self::$propertyNames?->offsetUnset($this);
-            $names = $this->names();
+        // An exact-name unset() bypasses __unset; rebuild rather than trust a
+        // hit on a removed property.
+        if ($property !== null && ! property_exists($this, $property)) {
+            $this->forgetPropertyNames();
+            $property = $this->propertyNames()[$lower] ?? null;
         }
 
-        return $names[$lower] ?? null;
+        return $property;
     }
 
     /**
-     * Lowercased name => property name; built from the properties in order, so
-     * of two casings of one name the later one wins.
+     * Lowercased name => the last property of that name in property order.
      *
      * @return array<string, string>
      */
-    private function names(): array
+    private function propertyNames(): array
     {
         self::$propertyNames ??= new \WeakMap;
         $names = self::$propertyNames[$this] ?? null;
 
         if ($names === null) {
-            $names = [];
+            $properties = array_keys(get_object_vars($this));
 
-            foreach (array_keys(get_object_vars($this)) as $property) {
-                $names[strtolower((string) $property)] = (string) $property;
+            if (self::$lastPropertyNames !== null && self::$lastPropertyNames[0] === $properties) {
+                $names = self::$lastPropertyNames[1];
+            } else {
+                $names = [];
+
+                foreach ($properties as $property) {
+                    $names[strtolower((string) $property)] = (string) $property;
+                }
+
+                self::$lastPropertyNames = [$properties, $names];
             }
 
             self::$propertyNames[$this] = $names;
@@ -233,16 +257,23 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
         return $names;
     }
 
-    /**
-     * Point reads in every casing of $name at the property $name, if the map
-     * has been built (otherwise it is built later from the properties).
-     */
-    private function resolveCasingTo(string $name): void
+    private function forgetPropertyNames(): void
     {
-        if (self::$propertyNames !== null && isset(self::$propertyNames[$this])) {
-            $names = self::$propertyNames[$this];
-            $names[strtolower($name)] = $name;
-            self::$propertyNames[$this] = $names;
+        self::$propertyNames?->offsetUnset($this);
+    }
+
+    /**
+     * Re-add an existing property so that it answers every other casing of
+     * its name. Without a twin it already does, and nothing moves.
+     */
+    private function moveLast(string $property): void
+    {
+        if ($this->propertyFor($property) === $property) {
+            return;
         }
+
+        $value = $this->{$property};
+        unset($this->{$property});
+        $this->{$property} = $value;
     }
 }
