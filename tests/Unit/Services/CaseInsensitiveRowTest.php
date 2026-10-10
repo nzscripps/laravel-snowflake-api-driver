@@ -250,6 +250,24 @@ class CaseInsensitiveRowTest extends TestCase
         $this->assertSame(2, $row->foo);
     }
 
+    public function test_any_column_name_is_a_plain_property(): void
+    {
+        // The row declares no members, so no column name can collide with one
+        // and be routed through the case-insensitive magic instead.
+        $this->assertSame([], (new \ReflectionClass(CaseInsensitiveRow::class))->getProperties());
+
+        $row = new CaseInsensitiveRow(['propertyNames' => null, 'PropertyNames' => 7, 'lastPropertyNames' => 1]);
+
+        $this->assertNull($row->propertyNames);
+        $this->assertFalse(isset($row->propertyNames));
+        $this->assertFalse(isset($row['propertyNames']));
+        $this->assertSame(1, $row->lastPropertyNames);
+
+        unset($row->propertyNames);
+
+        $this->assertSame(['PropertyNames' => 7, 'lastPropertyNames' => 1], (array) $row);
+    }
+
     public function test_builder_value_returns_the_column_not_the_row(): void
     {
         $query = $this->snowflakeQuery([new CaseInsensitiveRow(['ROW_COUNT' => 42])]);

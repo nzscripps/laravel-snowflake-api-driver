@@ -40,25 +40,6 @@ namespace LaravelSnowflakeApi\Services;
 class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSerializable
 {
     /**
-     * Per row: lowercased name => the property that answers it. A cache
-     * derived from property order, rebuilt whenever it may be stale. Held
-     * outside the instance so that casts and get_object_vars() see only
-     * columns.
-     *
-     * @var \WeakMap<self, array<string, string>>|null
-     */
-    private static ?\WeakMap $propertyNames = null;
-
-    /**
-     * Every row of one result has the same properties: the last map built is
-     * kept with its property list, and a row with the same list shares it
-     * (copy-on-write) instead of building its own.
-     *
-     * @var array{0: list<int|string>, 1: array<string, string>}|null
-     */
-    private static ?array $lastPropertyNames = null;
-
-    /**
      * @param  array<string, mixed>  $row  Column name => value
      */
     public function __construct(array $row = [])
@@ -86,12 +67,7 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
     {
         // Inside __set, PHP writes $name directly instead of recursing.
         $this->{$name} = $value;
-
-        if (self::$propertyNames !== null && isset(self::$propertyNames[$this])) {
-            $names = self::$propertyNames[$this];
-            $names[strtolower($name)] = $name;
-            self::$propertyNames[$this] = $names;
-        }
+        CaseInsensitiveRowNames::appended($this, $name);
     }
 
     /**
@@ -113,7 +89,7 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
 
         if ($property !== null) {
             unset($this->{$property});
-            $this->forgetPropertyNames();
+            CaseInsensitiveRowNames::forget($this);
         }
     }
 
@@ -144,11 +120,11 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
      */
     public function __serialize(): array
     {
-        $this->forgetPropertyNames();
+        CaseInsensitiveRowNames::forget($this);
 
         return [
             "\0".self::class."\0data" => get_object_vars($this),
-            "\0".self::class."\0keyMap" => $this->propertyNames(),
+            "\0".self::class."\0keyMap" => CaseInsensitiveRowNames::of($this),
         ];
     }
 
@@ -214,52 +190,16 @@ class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSeriali
     private function propertyFor(string $name): ?string
     {
         $lower = strtolower($name);
-        $property = $this->propertyNames()[$lower] ?? null;
+        $property = CaseInsensitiveRowNames::of($this)[$lower] ?? null;
 
         // An exact-name unset() bypasses __unset; rebuild rather than trust a
         // hit on a removed property.
         if ($property !== null && ! property_exists($this, $property)) {
-            $this->forgetPropertyNames();
-            $property = $this->propertyNames()[$lower] ?? null;
+            CaseInsensitiveRowNames::forget($this);
+            $property = CaseInsensitiveRowNames::of($this)[$lower] ?? null;
         }
 
         return $property;
-    }
-
-    /**
-     * Lowercased name => the last property of that name in property order.
-     *
-     * @return array<string, string>
-     */
-    private function propertyNames(): array
-    {
-        self::$propertyNames ??= new \WeakMap;
-        $names = self::$propertyNames[$this] ?? null;
-
-        if ($names === null) {
-            $properties = array_keys(get_object_vars($this));
-
-            if (self::$lastPropertyNames !== null && self::$lastPropertyNames[0] === $properties) {
-                $names = self::$lastPropertyNames[1];
-            } else {
-                $names = [];
-
-                foreach ($properties as $property) {
-                    $names[strtolower((string) $property)] = (string) $property;
-                }
-
-                self::$lastPropertyNames = [$properties, $names];
-            }
-
-            self::$propertyNames[$this] = $names;
-        }
-
-        return $names;
-    }
-
-    private function forgetPropertyNames(): void
-    {
-        self::$propertyNames?->offsetUnset($this);
     }
 
     /**
