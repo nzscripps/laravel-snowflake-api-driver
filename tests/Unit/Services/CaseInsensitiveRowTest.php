@@ -147,19 +147,68 @@ class CaseInsensitiveRowTest extends TestCase
         $this->assertSame('A25-54', $restored->demo);
 
         // What 0.12 and earlier wrote: private `data` and `keyMap` arrays.
-        $class = CaseInsensitiveRow::class;
-        $data = "\0{$class}\0data";
-        $keyMap = "\0{$class}\0keyMap";
-        $legacy = sprintf(
-            'O:%d:"%s":2:{s:%d:"%s";a:2:{s:12:"ORDER_NUMBER";i:1471386;s:4:"DEMO";s:6:"A25-54";}s:%d:"%s";a:2:{s:12:"order_number";s:12:"ORDER_NUMBER";s:4:"demo";s:4:"DEMO";}}',
-            strlen($class), $class, strlen($data), $data, strlen($keyMap), $keyMap,
-        );
-
-        $old = unserialize($legacy);
+        $old = unserialize($this->legacyPayload(
+            'a:2:{s:12:"ORDER_NUMBER";i:1471386;s:4:"DEMO";s:6:"A25-54";}',
+            'a:2:{s:12:"order_number";s:12:"ORDER_NUMBER";s:4:"demo";s:4:"DEMO";}',
+        ));
 
         $this->assertInstanceOf(CaseInsensitiveRow::class, $old);
         $this->assertSame(['ORDER_NUMBER' => 1471386, 'DEMO' => 'A25-54'], (array) $old);
         $this->assertSame(1471386, $old->Order_Number);
+    }
+
+    public function test_serializes_in_the_0_12_envelope_so_older_processes_can_read_it(): void
+    {
+        // During a rolling deploy or a rollback a 0.12 process reads rows this
+        // version cached. 0.12 has no __unserialize(): it maps the payload onto
+        // its private `data` and `keyMap` arrays, so the bytes must match.
+        $row = new CaseInsensitiveRow(['ID' => 7, 'NAME' => 'a']);
+
+        $this->assertSame(
+            $this->legacyPayload(
+                'a:2:{s:2:"ID";i:7;s:4:"NAME";s:1:"a";}',
+                'a:2:{s:2:"id";s:2:"ID";s:4:"name";s:4:"NAME";}',
+            ),
+            serialize($row),
+        );
+    }
+
+    public function test_a_legacy_payload_keeps_the_casing_its_reads_resolved_to(): void
+    {
+        // 0.12 row built from FOO and Foo, then written through FOO again:
+        // its keyMap sent every other casing to FOO.
+        $old = unserialize($this->legacyPayload(
+            'a:2:{s:3:"FOO";i:3;s:3:"Foo";i:2;}',
+            'a:1:{s:3:"foo";s:3:"FOO";}',
+        ));
+
+        $this->assertSame(['FOO' => 3, 'Foo' => 2], (array) $old);
+        $this->assertSame(3, $old->foo);
+        $this->assertSame(3, unserialize(serialize($old))->foo);
+    }
+
+    public function test_an_array_access_write_redirects_other_casings_to_it(): void
+    {
+        $row = new CaseInsensitiveRow(['FOO' => 1, 'Foo' => 2]);
+        $this->assertSame(2, $row->foo);   // newest added twin
+
+        $row['FOO'] = 3;
+
+        $this->assertSame(3, $row->foo);
+        $this->assertSame(3, $row['fOO']);
+    }
+
+    public function test_a_direct_write_to_an_existing_twin_updates_it_in_place(): void
+    {
+        // A public property write never reaches PHP magic, so it cannot move
+        // other casings (0.12 did). Documented: only ArrayAccess writes do.
+        $row = new CaseInsensitiveRow(['FOO' => 1, 'Foo' => 2]);
+        $row->foo;
+
+        $row->FOO = 4;
+
+        $this->assertSame(4, $row->FOO);
+        $this->assertSame(2, $row->foo);
     }
 
     public function test_builder_value_returns_the_column_not_the_row(): void
@@ -182,6 +231,21 @@ class CaseInsensitiveRowTest extends TestCase
         $this->assertSame(1001, $first->Order_Number);
         $this->assertSame(['ORDER_NUMBER' => 1001, 'STATION' => 'WEWS'], (array) $first);
         $this->assertSame([1001 => 'WEWS', 1002 => 'KNXV'], $stations->all());
+    }
+
+    /**
+     * A row exactly as 0.12 serialized it (no __serialize, private arrays).
+     */
+    private function legacyPayload(string $data, string $keyMap): string
+    {
+        $class = CaseInsensitiveRow::class;
+        $dataKey = "\0{$class}\0data";
+        $keyMapKey = "\0{$class}\0keyMap";
+
+        return sprintf(
+            'O:%d:"%s":2:{s:%d:"%s";%ss:%d:"%s";%s}',
+            strlen($class), $class, strlen($dataKey), $dataKey, $data, strlen($keyMapKey), $keyMapKey, $keyMap,
+        );
     }
 
     /**
