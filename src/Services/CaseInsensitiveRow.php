@@ -3,104 +3,187 @@
 namespace LaravelSnowflakeApi\Services;
 
 /**
- * A stdClass-like object that resolves property access case-insensitively.
+ * A Snowflake result row: a stdClass whose public properties are the columns
+ * exactly as Snowflake names them, readable in any other casing as well.
  *
- * Snowflake's API returns column names in UPPERCASE (e.g., ORDER_NUMBER),
- * but Laravel controllers and Blade templates often use mixed-case property
- * names (e.g., Order_Number, order_number). This class stores values with
- * their original UPPERCASE keys and resolves any casing on read.
+ * Snowflake folds unquoted aliases to UPPERCASE (`AS Order_Number` comes back
+ * as ORDER_NUMBER), while Laravel controllers and Blade templates often name a
+ * column the way the SQL text spells it. The columns are real properties, so
+ * everything that works on a PDO/stdClass row works here unchanged:
  *
- * Supports:
- *   $row->ORDER_NUMBER   (original)
- *   $row->Order_Number   (mixed)
- *   $row->order_number   (lower)
+ *   (array) $row, get_object_vars($row), foreach ($row as $column => $value),
+ *   property_exists($row, 'ORDER_NUMBER'), $row instanceof \stdClass,
+ *   json_encode($row), and Laravel's Builder::value()
  *
- * Also works with isset(), property_exists() patterns, and json_encode().
+ * Any other casing resolves through the magic accessors and ArrayAccess:
+ *
+ *   $row->Order_Number, $row->order_number, isset($row->order_number),
+ *   $row['Order_Number']
+ *
+ * isset() follows stdClass semantics in every casing: a selected column that
+ * holds NULL is not set. To ask whether a column was selected, use
+ * property_exists() with the column's own name, or array_key_exists() on
+ * toArray().
+ *
+ * Writing a casing that matches no property adds a property with that exact
+ * name; it does not overwrite the folded original, so both serialize. Later
+ * reads in any other casing resolve to the newest of them.
+ *
+ * Before 0.13 the columns lived in a private array: casts,
+ * get_object_vars() and property_exists() saw nothing, and isset() reported
+ * a selected NULL column as set.
  */
-class CaseInsensitiveRow implements \JsonSerializable, \ArrayAccess
+class CaseInsensitiveRow extends \stdClass implements \ArrayAccess, \JsonSerializable
 {
-    /** @var array<string, mixed> Original UPPERCASE key → value */
-    private array $data = [];
+    /**
+     * Per row: lowercased property name => property name, built on the first
+     * read in a casing that is not a property. Held outside the instance so
+     * that casts and get_object_vars() see only columns.
+     *
+     * @var \WeakMap<self, array<string, string>>|null
+     */
+    private static ?\WeakMap $propertyNames = null;
 
-    /** @var array<string, string> lowercase key → original UPPERCASE key */
-    private array $keyMap = [];
-
-    public function __construct(array $row)
+    /**
+     * @param  array<string, mixed>  $row  Column name => value
+     */
+    public function __construct(array $row = [])
     {
-        foreach ($row as $key => $value) {
-            $this->data[$key] = $value;
-            $this->keyMap[strtolower($key)] = $key;
+        foreach ($row as $column => $value) {
+            $this->{$column} = $value;
         }
     }
 
+    /**
+     * Reached only when $name is not a property: resolve its casing.
+     */
     public function __get(string $name): mixed
     {
-        // Try exact match first
-        if (array_key_exists($name, $this->data)) {
-            return $this->data[$name];
-        }
+        $property = $this->propertyFor($name);
 
-        // Case-insensitive lookup
-        $lower = strtolower($name);
-        if (isset($this->keyMap[$lower])) {
-            return $this->data[$this->keyMap[$lower]];
-        }
-
-        return null;
+        return $property === null ? null : $this->{$property};
     }
 
+    /**
+     * Reached only when $name is not a property: add it with this exact name.
+     */
     public function __set(string $name, mixed $value): void
     {
-        $this->data[$name] = $value;
-        $this->keyMap[strtolower($name)] = $name;
+        // Inside __set, PHP writes $name directly instead of recursing.
+        $this->{$name} = $value;
+
+        if (self::$propertyNames !== null && isset(self::$propertyNames[$this])) {
+            $names = self::$propertyNames[$this];
+            $names[strtolower($name)] = $name;
+            self::$propertyNames[$this] = $names;
+        }
     }
 
+    /**
+     * Reached only when $name is not a property.
+     */
     public function __isset(string $name): bool
     {
-        if (array_key_exists($name, $this->data)) {
-            return true;
-        }
+        $property = $this->propertyFor($name);
 
-        return isset($this->keyMap[strtolower($name)]);
+        return $property !== null && $this->{$property} !== null;
     }
 
+    /**
+     * Reached only when $name is not a property.
+     */
     public function __unset(string $name): void
     {
-        $lower = strtolower($name);
-        $original = $this->keyMap[$lower] ?? $name;
-        unset($this->data[$original], $this->keyMap[$lower]);
+        $property = $this->propertyFor($name);
+
+        if ($property !== null) {
+            unset($this->{$property});
+            self::$propertyNames?->offsetUnset($this);
+        }
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function jsonSerialize(): array
     {
-        return $this->data;
+        return get_object_vars($this);
     }
 
-    /** Allow array-style access for backwards compatibility */
+    /**
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
-        return $this->data;
+        return get_object_vars($this);
     }
 
-    // ArrayAccess implementation (case-insensitive)
+    /**
+     * @return array<string, mixed>
+     */
+    public function __serialize(): array
+    {
+        return get_object_vars($this);
+    }
+
+    /**
+     * Also restores rows serialized before 0.13, whose columns sat in a
+     * private `data` array (cached query results survive a deploy).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function __unserialize(array $data): void
+    {
+        $legacy = $data["\0".self::class."\0data"] ?? null;
+
+        foreach (is_array($legacy) ? $legacy : $data as $column => $value) {
+            $this->{$column} = $value;
+        }
+    }
+
+    // ArrayAccess: case-insensitive, with the same semantics as property access.
 
     public function offsetExists(mixed $offset): bool
     {
-        return $this->__isset((string) $offset);
+        return isset($this->{(string) $offset});
     }
 
     public function offsetGet(mixed $offset): mixed
     {
-        return $this->__get((string) $offset);
+        return $this->{(string) $offset};
     }
 
     public function offsetSet(mixed $offset, mixed $value): void
     {
-        $this->__set((string) $offset, $value);
+        $this->{(string) $offset} = $value;
     }
 
     public function offsetUnset(mixed $offset): void
     {
-        $this->__unset((string) $offset);
+        unset($this->{(string) $offset});
+    }
+
+    /**
+     * The property a casing of $name refers to, or null when there is none.
+     */
+    private function propertyFor(string $name): ?string
+    {
+        self::$propertyNames ??= new \WeakMap;
+        $lower = strtolower($name);
+        $names = self::$propertyNames[$this] ?? null;
+
+        // A property removed by an exact-name unset() bypasses __unset, so a
+        // hit is re-checked before it is trusted.
+        if ($names === null || (isset($names[$lower]) && ! property_exists($this, $names[$lower]))) {
+            $names = [];
+
+            foreach (array_keys(get_object_vars($this)) as $property) {
+                $names[strtolower((string) $property)] = (string) $property;
+            }
+
+            self::$propertyNames[$this] = $names;
+        }
+
+        return $names[$lower] ?? null;
     }
 }

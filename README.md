@@ -152,6 +152,35 @@ $results = DB::connection('snowflake_api')
     ->select('SELECT * FROM your_table WHERE condition = ?', ['value']);
 ```
 
+### Result rows
+
+Every row a select returns is a `LaravelSnowflakeApi\Services\CaseInsensitiveRow`:
+a `stdClass` whose public properties are the columns exactly as Snowflake names
+them (UPPERCASE for an unquoted alias), readable in any other casing too.
+
+```php
+$row = DB::connection('snowflake_api')->selectOne('select 7 as Spot_Count');
+
+$row->SPOT_COUNT;                       // 7, a real property
+$row->Spot_Count;                       // 7, resolved case-insensitively
+$row['spot_count'];                     // 7
+(array) $row;                           // ['SPOT_COUNT' => 7]
+property_exists($row, 'SPOT_COUNT');    // true (exact name only)
+DB::connection('snowflake_api')->table('t')->value('SPOT_COUNT'); // 7
+```
+
+`isset()` follows `stdClass` semantics in every casing: a selected column holding
+NULL is not set. Ask `property_exists()` with the column's own name, or
+`array_key_exists()` on `toArray()`, whether a column was selected. Writing a
+casing that matches no property adds a property with that exact name instead of
+overwriting the folded column, so both serialize.
+
+> **Upgrading from 0.12 or earlier.** Rows used to keep their columns in a private
+> array: `(array) $row`, `get_object_vars()`, `foreach`, `property_exists()` and
+> `Builder::value()` silently saw nothing, and `isset()` reported a selected NULL
+> column as set. Code that relied on either behaviour changes. Rows serialized by
+> older versions (for example in a cache) still unserialize.
+
 ### DML row counts and unknown outcomes
 
 `statement()`, `update()`, `insert()`, and `delete()` are unchanged: they only
