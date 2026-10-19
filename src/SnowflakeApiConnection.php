@@ -9,6 +9,7 @@ use Illuminate\Database\Query\Grammars\Grammar as QueryGrammarContract;
 use Illuminate\Database\Query\Processors\Processor;
 use Illuminate\Database\Schema\Grammars\Grammar as SchemaGrammarContract;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\SchemaGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Processor as SnowflakeProcessor;
@@ -16,6 +17,7 @@ use LaravelSnowflakeApi\Flavours\Snowflake\SnowflakeQueryBuilder;
 use LaravelSnowflakeApi\Services\CaseInsensitiveRow;
 use LaravelSnowflakeApi\Services\SnowflakeService;
 use LaravelSnowflakeApi\Services\ThreadSafeTokenProvider;
+use LaravelSnowflakeApi\Support\SnowflakeStringLiteral;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 use PDO;
 use Throwable;
@@ -295,7 +297,17 @@ class SnowflakeApiConnection extends Connection
     }
 
     /**
-     * Replace the binding placeholders with the actual values.
+     * Replace the `?` placeholders with the bindings, formatted as literals.
+     *
+     * Snowflake's SQL API receives finished SQL text, so placeholders are
+     * filled here. Only a `?` that is SQL syntax is a placeholder: one inside
+     * a string constant, a quoted identifier or a comment is text. Taking it
+     * for a placeholder would shift every later binding, and the shifted value
+     * would land outside quotes as SQL text.
+     *
+     * compileInsert()/compileUpsert() inline every value yet Laravel still
+     * passes the values as bindings, so a statement without placeholders is
+     * sent unchanged. Otherwise every placeholder needs exactly one binding.
      *
      * @param  string  $query
      * @return string
@@ -306,29 +318,108 @@ class SnowflakeApiConnection extends Connection
             return $query;
         }
 
+        $positions = $this->placeholderPositions($query);
+
+        if ($positions === []) {
+            return $query;
+        }
+
+        if (count($positions) !== count($bindings)) {
+            throw new InvalidArgumentException(sprintf(
+                'Snowflake statement has %d placeholder(s) but %d binding(s).',
+                count($positions),
+                count($bindings),
+            ));
+        }
+
+        $bindings = array_values($bindings);
+        $prepared = '';
+        $previous = 0;
+        foreach ($positions as $i => $position) {
+            $prepared .= substr($query, $previous, $position - $previous).$this->formatBinding($bindings[$i]);
+            $previous = $position + 1;
+        }
+
+        return $prepared.substr($query, $previous);
+    }
+
+    /**
+     * Byte offsets of the `?` placeholders in $query.
+     *
+     * Skips single-quoted string constants (with their '' and backslash
+     * escapes), $$-quoted string constants, double-quoted and unquoted
+     * identifiers, and --, // and block comments. Every delimiter is ASCII,
+     * so scanning bytes is safe for UTF-8 text.
+     *
+     * @return array<int, int>
+     */
+    private function placeholderPositions(string $query): array
+    {
         $positions = [];
-        $offset = 0;
-        while (($pos = mb_strpos($query, '?', $offset)) !== false) {
-            $positions[] = $pos;
-            $offset = $pos + 1;
+        $length = strlen($query);
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $query[$i];
+            $pair = substr($query, $i, 2);
+
+            if ($char === '?') {
+                $positions[] = $i;
+            } elseif ($char === "'") {
+                for ($i++; $i < $length; $i++) {
+                    if ($query[$i] === '\\') {
+                        $i++;
+                    } elseif ($query[$i] === "'") {
+                        if (($query[$i + 1] ?? '') !== "'") {
+                            break;
+                        }
+                        $i++;
+                    }
+                }
+            } elseif ($char === '"') {
+                // A doubled "" closes and reopens, which skips the same text.
+                $i = $this->offsetAfter($query, '"', $i + 1) - 1;
+            } elseif ($this->isIdentifierByte($char) && ! ctype_digit($char) && $char !== '$') {
+                // Unquoted identifiers may contain `$`, so the `$$` in
+                // `amount$$usd` does not open a dollar-quoted string.
+                while ($i + 1 < $length && $this->isIdentifierByte($query[$i + 1])) {
+                    $i++;
+                }
+            } elseif ($pair === '$$') {
+                $i = $this->offsetAfter($query, '$$', $i + 2) - 1;
+            } elseif ($pair === '--' || $pair === '//') {
+                $i = $this->offsetAfter($query, "\n", $i + 2) - 1;
+            } elseif ($pair === '/*') {
+                $i = $this->offsetAfter($query, '*/', $i + 2) - 1;
+            }
         }
 
-        $queryParts = [];
-        $prevPos = 0;
-        foreach ($positions as $i => $pos) {
-            $queryParts[] = mb_substr($query, $prevPos, $pos - $prevPos);
-            $queryParts[] = $this->formatBinding($bindings[$i] ?? '');
-            $prevPos = $pos + 1;
-        }
-        $queryParts[] = mb_substr($query, $prevPos);
+        return $positions;
+    }
 
-        return implode('', $queryParts);
+    /**
+     * A byte that can continue an unquoted identifier: letter, digit, `_`,
+     * `$`, or part of a multibyte UTF-8 character.
+     */
+    private function isIdentifierByte(string $byte): bool
+    {
+        return ctype_alnum($byte) || $byte === '_' || $byte === '$' || ord($byte) >= 0x80;
+    }
+
+    /**
+     * Offset just past the next $needle at or after $offset, or the end of
+     * $haystack when it is unterminated.
+     */
+    private function offsetAfter(string $haystack, string $needle, int $offset): int
+    {
+        $position = strpos($haystack, $needle, min($offset, strlen($haystack)));
+
+        return $position === false ? strlen($haystack) : $position + strlen($needle);
     }
 
     private function formatBinding($value): string
     {
         if (is_string($value)) {
-            return "'".str_replace("'", "''", $value)."'";
+            return SnowflakeStringLiteral::quote($value);
         }
         if (is_bool($value)) {
             return $value ? '1' : '0';
@@ -779,10 +870,6 @@ class SnowflakeApiConnection extends Connection
             return (string) $value;
         }
 
-        // Escape single quotes by doubling them (Snowflake standard)
-        $escaped = str_replace("'", "''", (string) $value);
-
-        // Wrap in single quotes
-        return "'".$escaped."'";
+        return SnowflakeStringLiteral::quote((string) $value);
     }
 }

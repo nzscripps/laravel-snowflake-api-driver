@@ -10,6 +10,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Query\Grammars\Grammar;
 use Illuminate\Database\Schema\ColumnDefinition;
 use LaravelSnowflakeApi\Traits\DebugLogging;
+use LaravelSnowflakeApi\Support\SnowflakeStringLiteral;
 use Illuminate\Support\Arr;
 
 class QueryGrammar extends Grammar
@@ -646,13 +647,13 @@ class QueryGrammar extends Grammar
 
         // If this column should be forced to string, always quote it
         if ($columnName && in_array(strtolower($columnName), array_map('strtolower', array_map('trim', $forceStringColumns)))) {
-            return "'" . str_replace("'", "''", (string) $value) . "'";
+            return SnowflakeStringLiteral::quote((string) $value);
         }
 
         // Check if we should treat numeric strings as strings
         // When SNOWFLAKE_QUOTE_NUMERIC_STRINGS is true, numeric strings will be quoted
         if (is_string($value) && is_numeric($value) && env('SNOWFLAKE_QUOTE_NUMERIC_STRINGS', false)) {
-            return "'" . str_replace("'", "''", $value) . "'";
+            return SnowflakeStringLiteral::quote($value);
         }
 
         if (is_numeric($value) && !is_string($value)) {
@@ -664,7 +665,7 @@ class QueryGrammar extends Grammar
             return $this->getValue($value);
         }
 
-        return "'" . str_replace("'", "''", (string) $value) . "'";
+        return SnowflakeStringLiteral::quote((string) $value);
     }
 
     /**
@@ -863,7 +864,7 @@ class QueryGrammar extends Grammar
         }
 
         // Basic single quote escaping for SQL strings
-        return "'" . str_replace("'", "''", (string) $value) . "'";
+        return SnowflakeStringLiteral::quote((string) $value);
     }
 
     /**
