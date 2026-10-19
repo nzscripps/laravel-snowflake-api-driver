@@ -11,6 +11,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use LaravelSnowflakeApi\Traits\DebugLogging;
+use LaravelSnowflakeApi\Support\SnowflakeStringLiteral;
 use RuntimeException;
 
 class SchemaGrammar extends Grammar
@@ -969,7 +970,7 @@ class SchemaGrammar extends Grammar
             return implode(', ', array_map([$this, 'quoteString'], $value));
         }
         // Use single quotes for SQL string literals
-        return "'" . str_replace("'", "''", $value) . "'";
+        return SnowflakeStringLiteral::quote((string) $value);
     }
 
     /**
