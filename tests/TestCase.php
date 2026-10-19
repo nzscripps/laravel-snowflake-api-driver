@@ -128,8 +128,8 @@ abstract class TestCase extends BaseTestCase
 
     /**
      * Reflection can read and write non-public properties without opt-in from
-     * PHP 8.1; PHP 8.0 (still in the CI matrix) needs setAccessible(), which is
-     * deprecated on 8.5 — hence the version guard.
+     * PHP 8.1; PHP 8.0 (composer.json still allows it) needs setAccessible(),
+     * which is deprecated on 8.5 — hence the version guard.
      */
     private function makeAccessible(\ReflectionProperty $property): void
     {
