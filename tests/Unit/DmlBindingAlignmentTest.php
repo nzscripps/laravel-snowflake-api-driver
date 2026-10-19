@@ -10,7 +10,6 @@ use Illuminate\Database\Query\Processors\Processor;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\SnowflakeApiConnection;
 use ReflectionClass;
-use ReflectionMethod;
 use Tests\TestCase;
 
 /**
@@ -38,8 +37,7 @@ class DmlBindingAlignmentTest extends TestCase
 
     private function prepare(string $sql, array $bindings): string
     {
-        return (new ReflectionMethod(SnowflakeApiConnection::class, 'prepareQuery'))
-            ->invoke($this->connection, $sql, $bindings);
+        return $this->invokePrivateMethod($this->connection, 'prepareQuery', $sql, $bindings);
     }
 
     public function test_an_update_ignores_bound_ordering_it_does_not_compile(): void
