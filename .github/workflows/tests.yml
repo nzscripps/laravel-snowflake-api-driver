@@ -10,7 +10,7 @@ jobs:
     name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
 
     # Pinned rather than ubuntu-latest: that label migrates to Ubuntu 26 on
-    # 2026-10-19, and the oldest PHP build in the matrix (8.1) is not
+    # 2026-10-19, and the oldest PHP builds in the matrix (8.0/8.1) are not
     # guaranteed to be installable by setup-php on a brand-new image.
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -31,14 +31,16 @@ jobs:
         # source uses PHP 8.0 syntax (union types, `mixed`, str_contains()), so
         # PHP 7.x cannot run it even though composer.json still says ^7.3.
         #
-        # PHP 8.0 is deliberately absent. It can only resolve
-        # web-token/jwt-signature 2.2.x, where RS256 lives in a separate
-        # jwt-signature-algorithm-rsa package that composer.json does not
-        # require, so token generation fails with "Class RS256 not found"
-        # (ThreadSafeTokenProviderTest, 3 errors). Re-add a PHP 8.0 lane once
-        # composer.json requires that package.
+        # PHP 8.0 needs a workaround (see the "Work around the missing RSA
+        # dependency" step): it can only resolve web-token/jwt-signature 2.2.x,
+        # where RS256 lives in a separate jwt-signature-algorithm-rsa package
+        # that composer.json does not require. A consumer installing on PHP 8.0
+        # today gets "Class RS256 not found" at token generation. The lane stays
+        # in the matrix so the rest of the suite keeps running on 8.0 and
+        # because it proves that package is the only thing missing.
         include:
           # Laravel 8 (Testbench 6, PHPUnit 9)
+          - { php: '8.0', laravel: '8', testbench: '^6.0' }
           - { php: '8.1', laravel: '8', testbench: '^6.0' }
           # Laravel 9 (Testbench 7, PHPUnit 9)
           - { php: '8.1', laravel: '9', testbench: '^7.0' }
@@ -79,12 +81,19 @@ jobs:
       # Pin this lane's Laravel major. Without this the matrix's `laravel` axis
       # does nothing and every lane resolves to the newest Laravel its PHP allows.
       # Pint and Rector are dev tools the tests don't use; Pint needs PHP 8.2+
-      # and would make the PHP 8.1 lanes unresolvable.
+      # and would make the PHP 8.0/8.1 lanes unresolvable.
       - name: Pin Laravel ${{ matrix.laravel }}
         run: |
           composer remove --dev laravel/pint rector/rector --no-update --no-interaction
           composer require "illuminate/database:^${{ matrix.laravel }}.0" "illuminate/support:^${{ matrix.laravel }}.0" --no-update --no-interaction
           composer require --dev "orchestra/testbench:${{ matrix.testbench }}" --no-update --no-interaction
+
+      # KNOWN DEFECT, not a CI quirk: composer.json should require this package
+      # itself. Delete this step once it does. Without it the lane fails with
+      # "Class Jose\Component\Signature\Algorithm\RS256 not found".
+      - name: Work around the missing RSA dependency (PHP 8.0)
+        if: matrix.php == '8.0'
+        run: composer require "web-token/jwt-signature-algorithm-rsa:^2.2" --no-update --no-interaction
 
       - name: Install dependencies
         run: composer update --prefer-dist --no-ansi --no-interaction --no-progress
