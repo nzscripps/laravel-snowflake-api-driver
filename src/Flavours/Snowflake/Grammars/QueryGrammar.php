@@ -137,11 +137,9 @@ class QueryGrammar extends Grammar
     public function compileSelect(Builder $query): string
     {
         $this->debugLog('Compile Select', ['file' => __FILE__, 'line' => __LINE__]);
+        // The parent already appends the unions; appending them again would
+        // compile each union twice against bindings that appear once.
         $sql = parent::compileSelect($query);
-
-        if ($query->unions) {
-             $sql = $this->wrapUnion($sql) . ' ' . $this->compileUnions($query);
-        }
 
         $this->debugLog('Compiled Select', ['sql' => $sql, 'file' => __FILE__, 'line' => __LINE__]);
         return $sql;
