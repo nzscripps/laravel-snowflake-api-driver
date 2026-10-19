@@ -84,7 +84,7 @@ jobs:
         run: composer update --prefer-dist --no-ansi --no-interaction --no-progress
 
       - name: Show resolved versions
-        run: composer show laravel/framework phpunit/phpunit orchestra/testbench | grep -E '^(name|versions)'
+        run: composer show --no-ansi | grep -E '^(laravel/framework|phpunit/phpunit|orchestra/testbench) '
 
       - name: Execute Unit Tests
         run: composer test:unit
