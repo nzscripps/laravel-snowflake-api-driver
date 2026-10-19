@@ -9,7 +9,6 @@ use Illuminate\Database\Query\Processors\Processor;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\SnowflakeApiConnection;
 use ReflectionClass;
-use ReflectionMethod;
 use Tests\TestCase;
 
 /**
@@ -36,8 +35,7 @@ class UnionCompilationTest extends TestCase
 
     private function prepare(Builder $query): string
     {
-        return (new ReflectionMethod(SnowflakeApiConnection::class, 'prepareQuery'))
-            ->invoke($this->connection, $query->toSql(), $query->getBindings());
+        return $this->invokePrivateMethod($this->connection, 'prepareQuery', $query->toSql(), $query->getBindings());
     }
 
     public function test_a_union_is_compiled_once(): void

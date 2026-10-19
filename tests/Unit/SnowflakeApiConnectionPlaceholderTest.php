@@ -9,7 +9,6 @@ use InvalidArgumentException;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\SnowflakeApiConnection;
 use ReflectionClass;
-use ReflectionMethod;
 use Tests\TestCase;
 
 /**
@@ -25,8 +24,7 @@ class SnowflakeApiConnectionPlaceholderTest extends TestCase
     {
         $connection = (new ReflectionClass(SnowflakeApiConnection::class))->newInstanceWithoutConstructor();
 
-        return (new ReflectionMethod(SnowflakeApiConnection::class, 'prepareQuery'))
-            ->invoke($connection, $query, $bindings);
+        return $this->invokePrivateMethod($connection, 'prepareQuery', $query, $bindings);
     }
 
     public function test_it_fills_placeholders_in_order(): void
@@ -154,8 +152,7 @@ class SnowflakeApiConnectionPlaceholderTest extends TestCase
 
         $this->assertSame(
             "select 1 where d >= '2026-10-19 12:34:56.000000'",
-            (new ReflectionMethod(SnowflakeApiConnection::class, 'prepareQuery'))
-                ->invoke($connection, 'select 1 where d >= ?', [new DateTimeImmutable('2026-10-19 12:34:56')]),
+            $this->invokePrivateMethod($connection, 'prepareQuery', 'select 1 where d >= ?', [new DateTimeImmutable('2026-10-19 12:34:56')]),
         );
     }
 

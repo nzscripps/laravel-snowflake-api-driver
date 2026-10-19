@@ -127,14 +127,25 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
-     * Reflection can read and write non-public properties without opt-in from
-     * PHP 8.1; PHP 8.0 (composer.json still allows it) needs setAccessible(),
-     * which is deprecated on 8.5 — hence the version guard.
+     * Call a non-public method of an object.
      */
-    private function makeAccessible(\ReflectionProperty $property): void
+    protected function invokePrivateMethod(object $object, string $method, mixed ...$arguments): mixed
+    {
+        $reflection = new \ReflectionMethod($object, $method);
+        $this->makeAccessible($reflection);
+
+        return $reflection->invoke($object, ...$arguments);
+    }
+
+    /**
+     * Reflection can reach non-public properties and methods without opt-in
+     * from PHP 8.1; PHP 8.0 (composer.json still allows it) needs
+     * setAccessible(), which is deprecated on 8.5 — hence the version guard.
+     */
+    private function makeAccessible(\ReflectionProperty|\ReflectionMethod $member): void
     {
         if (PHP_VERSION_ID < 80100) {
-            $property->setAccessible(true);
+            $member->setAccessible(true);
         }
     }
 }
