@@ -332,7 +332,8 @@ class SnowflakeApiConnection extends Connection
             ));
         }
 
-        $bindings = array_values($bindings);
+        // Dates become strings in the grammar's format, as PDO connections do.
+        $bindings = array_values($this->prepareBindings($bindings));
         $prepared = '';
         $previous = 0;
         foreach ($positions as $i => $position) {
@@ -430,8 +431,14 @@ class SnowflakeApiConnection extends Connection
         if (is_null($value)) {
             return 'NULL';
         }
+        if (is_object($value) && method_exists($value, '__toString')) {
+            return SnowflakeStringLiteral::quote((string) $value);
+        }
 
-        return (string) $value;
+        throw new InvalidArgumentException(sprintf(
+            'Snowflake bindings must be strings, numbers, booleans, null, dates or objects with __toString(); got %s.',
+            is_object($value) ? get_class($value) : gettype($value)
+        ));
     }
 
     /**

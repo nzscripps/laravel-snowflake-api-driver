@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use DateTimeImmutable;
 use InvalidArgumentException;
+use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\SnowflakeApiConnection;
 use ReflectionClass;
 use ReflectionMethod;
@@ -143,6 +145,42 @@ class SnowflakeApiConnectionPlaceholderTest extends TestCase
         $this->expectExceptionMessage('1 placeholder(s) but 2 binding(s)');
 
         $this->prepare("select 1 where a = ? and b = 'y?'", ['x', 'y']);
+    }
+
+    public function test_a_date_binding_is_formatted_and_quoted(): void
+    {
+        $connection = (new ReflectionClass(SnowflakeApiConnection::class))->newInstanceWithoutConstructor();
+        $connection->setQueryGrammar(new QueryGrammar($connection));
+
+        $this->assertSame(
+            "select 1 where d >= '2026-10-19 12:34:56.000000'",
+            (new ReflectionMethod(SnowflakeApiConnection::class, 'prepareQuery'))
+                ->invoke($connection, 'select 1 where d >= ?', [new DateTimeImmutable('2026-10-19 12:34:56')]),
+        );
+    }
+
+    public function test_a_stringable_binding_is_quoted_like_a_string(): void
+    {
+        $value = new class
+        {
+            public function __toString(): string
+            {
+                return "x\\') OR 1=1 --";
+            }
+        };
+
+        $this->assertSame(
+            "select 1 where a = 'x\\\\'') OR 1=1 --'",
+            $this->prepare('select 1 where a = ?', [$value]),
+        );
+    }
+
+    public function test_a_binding_that_cannot_be_a_literal_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Snowflake bindings must be');
+
+        $this->prepare('select 1 where a = ?', [new \stdClass]);
     }
 
     public function test_a_statement_without_bindings_is_sent_unchanged(): void
