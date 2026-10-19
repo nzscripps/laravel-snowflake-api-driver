@@ -34,14 +34,14 @@ class DebugLoggingTest extends TestCase
                 return true;
             }
 
-            public function test_log($message, $context = [])
+            public function callDebugLog($message, $context = [])
             {
                 $this->debugLog($message, $context);
             }
         };
 
         // Act
-        $mock->testLog('Test message', ['key' => 'value']);
+        $mock->callDebugLog('Test message', ['key' => 'value']);
 
         // Assert is handled by the mock expectation
         $this->addToAssertionCount(1);
@@ -68,14 +68,14 @@ class DebugLoggingTest extends TestCase
                 return false;
             }
 
-            public function test_log($message, $context = [])
+            public function callDebugLog($message, $context = [])
             {
                 $this->debugLog($message, $context);
             }
         };
 
         // Act
-        $mock->testLog('Test message', ['key' => 'value']);
+        $mock->callDebugLog('Test message', ['key' => 'value']);
 
         // Assert is handled by the mock expectation
         $this->addToAssertionCount(1);
