@@ -835,17 +835,42 @@ class QueryGrammar extends Grammar
     /**
      * Prepare the bindings for an update statement.
      *
+     * compileUpdate() emits the target table, joins, SET values and WHERE
+     * clause in that order, so the bindings follow the same order. Laravel's
+     * version also keeps order, group, having and union bindings, which have
+     * no placeholder here, and puts the target's bindings after the SET values.
+     *
      * @param array $bindings
      * @param array $values
      * @return array
      */
     public function prepareBindingsForUpdate(array $bindings, array $values): array
     {
-        // Snowflake doesn't typically use bindings in the same way due to the API approach.
-        // This method might not be directly used if the Connection class builds the full SQL.
-        // However, if bindings were to be used, they would be merged here.
-        $this->debugLog('prepareBindingsForUpdate (potentially unused)', ['bindings' => $bindings, 'values' => $values]);
-        return parent::prepareBindingsForUpdate($bindings, $values);
+        $this->debugLog('prepareBindingsForUpdate', ['bindings' => $bindings, 'values' => $values]);
+
+        $values = Arr::flatten(array_map(fn ($value) => value($value), $values));
+
+        return array_values(array_merge(
+            $bindings['from'] ?? [],
+            $bindings['join'] ?? [],
+            $values,
+            $bindings['where'] ?? [],
+        ));
+    }
+
+    /**
+     * Prepare the bindings for a delete statement.
+     *
+     * @param array $bindings
+     * @return array
+     */
+    public function prepareBindingsForDelete(array $bindings): array
+    {
+        return array_values(array_merge(
+            $bindings['from'] ?? [],
+            $bindings['join'] ?? [],
+            $bindings['where'] ?? [],
+        ));
     }
 
     /**
