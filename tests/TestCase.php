@@ -106,6 +106,7 @@ abstract class TestCase extends BaseTestCase
     {
         $reflection = new \ReflectionClass($object);
         $property = $reflection->getProperty($property);
+        $this->makeAccessible($property);
         $property->setValue($object, $value);
     }
 
@@ -120,7 +121,20 @@ abstract class TestCase extends BaseTestCase
     {
         $reflection = new \ReflectionClass($object);
         $property = $reflection->getProperty($property);
+        $this->makeAccessible($property);
 
         return $property->getValue($object);
+    }
+
+    /**
+     * Reflection can read and write non-public properties without opt-in from
+     * PHP 8.1; PHP 8.0 (still in the CI matrix) needs setAccessible(), which is
+     * deprecated on 8.5 — hence the version guard.
+     */
+    private function makeAccessible(\ReflectionProperty $property): void
+    {
+        if (PHP_VERSION_ID < 80100) {
+            $property->setAccessible(true);
+        }
     }
 }
