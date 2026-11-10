@@ -179,9 +179,14 @@ class SnowflakeApiConnection extends Connection
      * @param  string  $query
      * @param  array  $bindings
      * @param  bool  $useReadPdo
+     * @param  array  $fetchUsing  PDO fetch options. The REST driver requires an empty array.
      */
-    public function select($query, $bindings = [], $useReadPdo = true): array
+    public function select($query, $bindings = [], $useReadPdo = true, array $fetchUsing = []): array
     {
+        if ($fetchUsing !== []) {
+            throw new InvalidArgumentException('PDO fetch modes are unavailable for the Snowflake REST API driver.');
+        }
+
         $this->debugLog('SnowflakeApiConnection: Executing select query', [
             'query' => $query,
             'bindings_count' => count($bindings),
@@ -239,8 +244,12 @@ class SnowflakeApiConnection extends Connection
      * case-insensitive row objects. It avoids loading every Snowflake result
      * partition into memory before the caller can start processing rows.
      */
-    public function cursor($query, $bindings = [], $useReadPdo = true)
+    public function cursor($query, $bindings = [], $useReadPdo = true, array $fetchUsing = [])
     {
+        if ($fetchUsing !== []) {
+            throw new InvalidArgumentException('PDO fetch modes are unavailable for the Snowflake REST API driver.');
+        }
+
         $this->debugLog('SnowflakeApiConnection: Executing cursor query', [
             'query' => $query,
             'bindings_count' => count($bindings),

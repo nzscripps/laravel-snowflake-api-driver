@@ -253,7 +253,7 @@ class TransactionUsageTest extends TestCase
             }
 
             // Override database methods to work with mock data
-            public function select($query, $bindings = [], $useReadPdo = true): array
+            public function select($query, $bindings = [], $useReadPdo = true, array $fetchUsing = []): array
             {
                 $this->logs[] = "SELECT: $query";
 
@@ -418,7 +418,7 @@ class TransactionUsageTest extends TestCase
             }
 
             // Override various methods that would try to access the database
-            public function select($query, $bindings = [], $useReadPdo = true): array
+            public function select($query, $bindings = [], $useReadPdo = true, array $fetchUsing = []): array
             {
                 $this->logs[] = "SELECT: $query";
 

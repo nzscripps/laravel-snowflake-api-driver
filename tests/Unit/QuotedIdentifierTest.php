@@ -15,7 +15,9 @@ class QuotedIdentifierTest extends TestCase
         // Get a reflection of the protected wrapColumn method
         $grammar = new QueryGrammar;
         $method = new \ReflectionMethod(QueryGrammar::class, 'wrapColumn');
-        $method->setAccessible(true);
+        if (PHP_VERSION_ID < 80100) {
+            $method->setAccessible(true);
+        }
 
         // Test with a standard column name
         $result = $method->invoke($grammar, 'regular_column');

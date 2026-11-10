@@ -28,7 +28,7 @@ class UnionCompilationTest extends TestCase
         $this->connection->setQueryGrammar(new QueryGrammar($this->connection));
     }
 
-    private function query(): Builder
+    private function snowflakeQuery(): Builder
     {
         return new Builder($this->connection, $this->connection->getQueryGrammar(), new Processor);
     }
@@ -40,8 +40,8 @@ class UnionCompilationTest extends TestCase
 
     public function test_a_union_is_compiled_once(): void
     {
-        $query = $this->query()->from('a')->where('x', 1)
-            ->union($this->query()->from('b')->where('y', 'two'));
+        $query = $this->snowflakeQuery()->from('a')->where('x', 1)
+            ->union($this->snowflakeQuery()->from('b')->where('y', 'two'));
 
         $this->assertSame(
             'select * from (select * from A where x = ?) union select * from (select * from B where y = ?)',
@@ -55,9 +55,9 @@ class UnionCompilationTest extends TestCase
 
     public function test_every_union_binding_is_consumed_once(): void
     {
-        $query = $this->query()->from('a')->where('x', 1)
-            ->union($this->query()->from('b')->where('y', 2))
-            ->unionAll($this->query()->from('c')->where('z', 3))
+        $query = $this->snowflakeQuery()->from('a')->where('x', 1)
+            ->union($this->snowflakeQuery()->from('b')->where('y', 2))
+            ->unionAll($this->snowflakeQuery()->from('c')->where('z', 3))
             ->orderBy('x');
 
         $this->assertSame(3, substr_count($query->toSql(), '?'));

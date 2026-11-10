@@ -5,14 +5,10 @@ declare(strict_types=1);
 namespace LaravelSnowflakeApi\Services;
 
 use Exception;
+use Firebase\JWT\JWT;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Jose\Component\Core\AlgorithmManager;
-use Jose\Component\KeyManagement\JWKFactory;
-use Jose\Component\Signature\Algorithm\RS256;
-use Jose\Component\Signature\JWSBuilder;
-use Jose\Component\Signature\Serializer\CompactSerializer;
 use LaravelSnowflakeApi\Exceptions\SnowflakeApiException;
 use LaravelSnowflakeApi\Traits\DebugLogging;
 
@@ -595,16 +591,10 @@ class ThreadSafeTokenProvider
             'contains_end' => strpos($keyContent, '-----END') !== false,
         ]);
 
-        // Create JWK from private key
-        // SECURITY: Private key is processed in memory and never persisted
-        $privateKey = JWKFactory::createFromKey(
-            $keyContent,
-            $this->config->getPrivateKeyPassphrase(),
-            [
-                'use' => 'sig',
-                'alg' => 'RS256',
-            ]
-        );
+        $privateKey = openssl_pkey_get_private($keyContent, $this->config->getPrivateKeyPassphrase());
+        if ($privateKey === false || (openssl_pkey_get_details($privateKey)['type'] ?? null) !== OPENSSL_KEYTYPE_RSA) {
+            throw new Exception('Unable to load an RSA private key');
+        }
 
         // Prepare JWT claims
         $publicKeyFingerprint = 'SHA256:'.$this->config->getPublicKey();
@@ -623,19 +613,7 @@ class ThreadSafeTokenProvider
             'exp_in_seconds' => $expiresIn - time(),
         ]);
 
-        // Build and sign JWT
-        $algorithmManager = new AlgorithmManager([new RS256]);
-        $jwsBuilder = new JWSBuilder($algorithmManager);
-
-        $jws = $jwsBuilder
-            ->create()
-            ->withPayload(json_encode($payload))
-            ->addSignature($privateKey, ['alg' => 'RS256', 'typ' => 'JWT'])
-            ->build();
-
-        // Serialize to compact format
-        $serializer = new CompactSerializer;
-        $token = $serializer->serialize($jws);
+        $token = JWT::encode($payload, $privateKey, 'RS256');
 
         // Log token metadata (never log the actual token)
         $tokenParts = explode('.', $token);

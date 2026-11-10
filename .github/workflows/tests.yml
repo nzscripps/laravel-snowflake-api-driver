@@ -26,18 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # What composer.json supports (illuminate/* ^8 - ^12), exercised at the
-        # oldest and newest PHP each Laravel major officially runs on. The
-        # source uses PHP 8.0 syntax (union types, `mixed`, str_contains()), so
-        # PHP 7.x cannot run it even though composer.json still says ^7.3.
-        #
-        # PHP 8.0 needs a workaround (see the "Work around the missing RSA
-        # dependency" step): it can only resolve web-token/jwt-signature 2.2.x,
-        # where RS256 lives in a separate jwt-signature-algorithm-rsa package
-        # that composer.json does not require. A consumer installing on PHP 8.0
-        # today gets "Class RS256 not found" at token generation. The lane stays
-        # in the matrix so the rest of the suite keeps running on 8.0 and
-        # because it proves that package is the only thing missing.
+        # Exercise the oldest and newest PHP versions for each Laravel major.
         include:
           # Laravel 8 (Testbench 6, PHPUnit 9)
           - { php: '8.0', laravel: '8', testbench: '^6.0' }
@@ -54,6 +43,9 @@ jobs:
           # Laravel 12 (Testbench 10, PHPUnit 11)
           - { php: '8.2', laravel: '12', testbench: '^10.0' }
           - { php: '8.5', laravel: '12', testbench: '^10.0' }
+          # Laravel 13 (Testbench 11, PHPUnit 11)
+          - { php: '8.3', laravel: '13', testbench: '^11.0' }
+          - { php: '8.5', laravel: '13', testbench: '^11.0' }
 
     steps:
       - uses: actions/checkout@v7
@@ -88,13 +80,6 @@ jobs:
           composer require "illuminate/database:^${{ matrix.laravel }}.0" "illuminate/support:^${{ matrix.laravel }}.0" --no-update --no-interaction
           composer require --dev "orchestra/testbench:${{ matrix.testbench }}" --no-update --no-interaction
 
-      # KNOWN DEFECT, not a CI quirk: composer.json should require this package
-      # itself. Delete this step once it does. Without it the lane fails with
-      # "Class Jose\Component\Signature\Algorithm\RS256 not found".
-      - name: Work around the missing RSA dependency (PHP 8.0)
-        if: matrix.php == '8.0'
-        run: composer require "web-token/jwt-signature-algorithm-rsa:^2.2" --no-update --no-interaction
-
       - name: Install dependencies
         run: composer update --prefer-dist --no-ansi --no-interaction --no-progress
 
@@ -108,7 +93,7 @@ jobs:
       # concurrent matrix jobs don't hit the same Snowflake schema at once. With
       # no secrets configured the runner script exits 0 without running anything.
       - name: Execute Integration Tests
-        if: github.ref == 'refs/heads/main' && matrix.php == '8.5' && matrix.laravel == '12'
+        if: github.ref == 'refs/heads/main' && matrix.php == '8.5' && matrix.laravel == '13'
         env:
           SNOWFLAKE_TEST_URL: ${{ secrets.SNOWFLAKE_TEST_URL }}
           SNOWFLAKE_TEST_ACCOUNT: ${{ secrets.SNOWFLAKE_TEST_ACCOUNT }}

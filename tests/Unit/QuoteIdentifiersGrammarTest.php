@@ -31,7 +31,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_select_alias_keeps_its_case_when_flag_is_on(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('vp_cpln_enriched')
             ->select(['ORDER_NUMBER', 'MPLUS_DEMO_MAPPING as Demo']);
 
@@ -43,7 +43,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_lower_case_select_alias_is_quoted_when_flag_is_on(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('vp_cpln_enriched')
             ->select(['MPLUS_DEMO_MAPPING as demo']);
 
@@ -55,7 +55,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_expression_alias_in_a_select_string_is_quoted_without_touching_the_expression(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('orders')
             ->select(['SUM(t.DELIVERED_IMPRESSIONS) as Delivered_Impressions']);
 
@@ -67,7 +67,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_table_alias_is_a_double_quoted_identifier_not_a_string_literal_when_flag_is_on(): void
     {
-        $query = $this->query()->from('orders as o')->select(['o.order_number']);
+        $query = $this->snowflakeQuery()->from('orders as o')->select(['o.order_number']);
 
         // The alias is emitted upper-cased (resolveTableName) and quoted, while the
         // unquoted reference `o.` folds to O — so the two still resolve to each other.
@@ -79,7 +79,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_join_alias_is_a_double_quoted_identifier_when_flag_is_on(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('orders')
             ->join('order_lines as ol', 'ol.order_id', '=', 'orders.id');
 
@@ -91,7 +91,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_explicitly_quoted_alias_is_honoured_rather_than_stripped(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('orders')
             ->select(['MPLUS_DEMO_MAPPING as "Demo"']);
 
@@ -113,14 +113,14 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_qualified_column_references_are_untouched_when_flag_is_on(): void
     {
-        $query = $this->query()->from('orders')->select(['orders.order_number']);
+        $query = $this->snowflakeQuery()->from('orders')->select(['orders.order_number']);
 
         $this->assertSame('select orders.order_number from ORDERS', $query->toSql());
     }
 
     public function test_pivot_style_quoted_columns_are_untouched_when_flag_is_on(): void
     {
-        $query = $this->query()->from('orders')->select(['"\'9e90t3nOfBJS3oQuFn7MzI3v0G1s\'"']);
+        $query = $this->snowflakeQuery()->from('orders')->select(['"\'9e90t3nOfBJS3oQuFn7MzI3v0G1s\'"']);
 
         $this->assertSame(
             "select '9e90t3nOfBJS3oQuFn7MzI3v0G1s' from ORDERS",
@@ -130,7 +130,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_raw_expressions_are_never_rewritten_by_the_flag(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('orders')
             ->selectRaw('SUM(DELIVERED) as Delivered_Impressions');
 
@@ -142,7 +142,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_a_trailing_as_that_is_not_a_simple_alias_is_left_alone(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('orders')
             ->select(["IFF(STATUS = 'a as b', 1, 0)"]);
 
@@ -157,7 +157,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
         // PCRE's $ matches before a trailing newline; using it here would emit
         // `X as "Foo"` and lose the newline, so flag-on output would differ from
         // flag-off by more than the quoting.
-        $query = $this->query()->from('orders')->select(["MPLUS_DEMO_MAPPING as Demo\n"]);
+        $query = $this->snowflakeQuery()->from('orders')->select(["MPLUS_DEMO_MAPPING as Demo\n"]);
 
         $this->assertSame("select MPLUS_DEMO_MAPPING as Demo\n from ORDERS", $query->toSql());
     }
@@ -180,7 +180,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_predicates_groups_and_orders_are_untouched_when_flag_is_on(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('orders')
             ->select(['A as B'])
             ->where('Mixed_Col', 1)
@@ -200,7 +200,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
         // therefore does NOT round-trip to its own reference: `order by Total`
         // folds to TOTAL while the alias is exactly "Total". Callers must spell
         // aliases UPPER CASE for any alias they intend to reference.
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('orders')
             ->select(['SUM(x) as Total'])
             ->groupBy('a')
@@ -217,7 +217,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
         // selectSub routes its alias through wrap() rather than the select-column
         // path, so it is NOT quoted. Documented, not fixed: wrap() cannot
         // distinguish an alias from a column without breaking plain columns.
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('orders')
             ->selectSub(function ($query): void {
                 $query->from('order_lines')->selectRaw('count(*)');
@@ -229,14 +229,14 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_unicode_aliases_are_quoted_like_ascii_ones(): void
     {
-        $query = $this->query()->from('orders')->select(['MPLUS_DEMO_MAPPING as Démo']);
+        $query = $this->snowflakeQuery()->from('orders')->select(['MPLUS_DEMO_MAPPING as Démo']);
 
         $this->assertSame('select MPLUS_DEMO_MAPPING as "Démo" from ORDERS', $query->toSql());
     }
 
     public function test_a_trailing_space_after_the_alias_leaves_the_column_untouched(): void
     {
-        $query = $this->query()->from('orders')->select(['MPLUS_DEMO_MAPPING as Demo ']);
+        $query = $this->snowflakeQuery()->from('orders')->select(['MPLUS_DEMO_MAPPING as Demo ']);
 
         // Fail-safe: unmatched input keeps today's exact output rather than
         // guessing where the alias ends.
@@ -248,7 +248,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
         // columnize() is shared with DML; only compileColumns() does alias
         // quoting, so a column literally named "x as y" stays a column name.
         $grammar = $this->grammar(true);
-        $builder = $this->query()->from('orders');
+        $builder = $this->snowflakeQuery()->from('orders');
 
         $sql = $grammar->compileInsert($builder, [['id' => 1, 'x as y' => 2]]);
 
@@ -258,7 +258,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
 
     public function test_group_by_column_lists_are_not_alias_quoted(): void
     {
-        $query = $this->query()->from('orders')->select(['A as B'])->groupBy('C as D');
+        $query = $this->snowflakeQuery()->from('orders')->select(['A as B'])->groupBy('C as D');
 
         $this->assertSame(
             'select A as "B" from ORDERS group by C as D',
@@ -315,7 +315,7 @@ class QuoteIdentifiersGrammarTest extends TestCase
         return $grammar;
     }
 
-    private function query(): Builder
+    private function snowflakeQuery(): Builder
     {
         return new Builder($this->connection(true), $this->grammar(true), new Processor);
     }

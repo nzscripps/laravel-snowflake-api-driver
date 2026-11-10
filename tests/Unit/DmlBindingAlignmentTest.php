@@ -30,7 +30,7 @@ class DmlBindingAlignmentTest extends TestCase
         $this->connection->setQueryGrammar(new QueryGrammar($this->connection));
     }
 
-    private function query(): Builder
+    private function snowflakeQuery(): Builder
     {
         return new Builder($this->connection, $this->connection->getQueryGrammar(), new Processor);
     }
@@ -42,7 +42,7 @@ class DmlBindingAlignmentTest extends TestCase
 
     public function test_an_update_ignores_bound_ordering_it_does_not_compile(): void
     {
-        $query = $this->query()->from('a')->where('id', 42)
+        $query = $this->snowflakeQuery()->from('a')->where('id', 42)
             ->orderByRaw('case when priority = ? then 0 else 1 end', [9]);
         $grammar = $this->connection->getQueryGrammar();
         $values = ['status' => 'done'];
@@ -56,7 +56,7 @@ class DmlBindingAlignmentTest extends TestCase
 
     public function test_a_delete_ignores_bound_ordering_it_does_not_compile(): void
     {
-        $query = $this->query()->from('a')->where('id', 42)
+        $query = $this->snowflakeQuery()->from('a')->where('id', 42)
             ->orderByRaw('case when priority = ? then 0 else 1 end', [9]);
         $grammar = $this->connection->getQueryGrammar();
 
@@ -79,7 +79,7 @@ class DmlBindingAlignmentTest extends TestCase
 
     public function test_a_delete_keeps_the_binding_of_a_bound_target(): void
     {
-        $query = $this->query()->fromRaw('IDENTIFIER(?)', ['a'])->where('id', 42);
+        $query = $this->snowflakeQuery()->fromRaw('IDENTIFIER(?)', ['a'])->where('id', 42);
         $grammar = $this->connection->getQueryGrammar();
 
         $this->assertSame(
@@ -90,7 +90,7 @@ class DmlBindingAlignmentTest extends TestCase
 
     public function test_an_update_binds_a_bound_target_before_its_set_values(): void
     {
-        $query = $this->query()->fromRaw('IDENTIFIER(?)', ['a'])->where('id', 42);
+        $query = $this->snowflakeQuery()->fromRaw('IDENTIFIER(?)', ['a'])->where('id', 42);
 
         $this->assertSame(
             "update IDENTIFIER('a') set status = 'done' where id = 42",

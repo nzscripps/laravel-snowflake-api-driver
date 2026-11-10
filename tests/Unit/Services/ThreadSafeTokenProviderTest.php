@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Unit\Services;
 
 use Exception;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
@@ -124,8 +126,13 @@ class ThreadSafeTokenProviderTest extends TestCase
 
     public function test_get_token_generates_new_when_cache_misses()
     {
-        // This test verifies new token generation when all caches miss
-        $provider = new ThreadSafeTokenProvider($this->config);
+        $privateKey = openssl_pkey_get_private($this->getTestPrivateKey());
+        $passphrase = 'test-passphrase';
+        $this->assertTrue(openssl_pkey_export($privateKey, $encryptedPem, $passphrase));
+        $provider = new ThreadSafeTokenProvider($this->makeConfig(
+            privateKey: str_replace("\n", '\n', $encryptedPem),
+            passphrase: $passphrase
+        ));
         $this->setDriverLockSupport('array', true);
 
         $cacheKey = 'snowflake_api_token:test_account:test_user';
@@ -166,8 +173,12 @@ class ThreadSafeTokenProviderTest extends TestCase
         // Get token - should generate new one
         $token = $provider->getToken();
 
-        $this->assertNotEmpty($token);
-        $this->assertStringContainsString('.', $token); // JWT format
+        $publicKey = openssl_pkey_get_details($privateKey)['key'];
+        $claims = JWT::decode($token, new Key($publicKey, 'RS256'));
+
+        $this->assertSame('test_user.SHA256:test_public_key_fingerprint', $claims->iss);
+        $this->assertSame('test_user', $claims->sub);
+        $this->assertEqualsWithDelta(3600, $claims->exp - $claims->iat, 1);
     }
 
     public function test_lock_timeout_falls_back_to_generation()
@@ -437,15 +448,17 @@ EOT;
     private function makeConfig(
         string $account = 'test_account',
         string $user = 'test_user',
-        ?string $cacheDriver = null
+        ?string $cacheDriver = null,
+        ?string $privateKey = null,
+        string $passphrase = ''
     ): SnowflakeConfig {
         return new SnowflakeConfig(
             'https://test.snowflakecomputing.com',
             $account,
             $user,
             'test_public_key_fingerprint',
-            $this->getTestPrivateKey(),
-            '',
+            $privateKey ?? $this->getTestPrivateKey(),
+            $passphrase,
             'test_warehouse',
             'test_database',
             'test_schema',

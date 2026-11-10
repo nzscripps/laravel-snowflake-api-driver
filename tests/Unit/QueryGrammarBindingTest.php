@@ -19,7 +19,7 @@ class QueryGrammarBindingTest extends TestCase
 
     public function test_basic_where_clauses_keep_placeholders_so_where_raw_bindings_stay_aligned(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('order_detail')
             ->where('ORDER_NUMBER', '1471386')
             ->whereRaw('LOWER(STATION_CALL_LETTERS) = ?', ['kscr'])
@@ -34,7 +34,7 @@ class QueryGrammarBindingTest extends TestCase
 
     public function test_where_raw_before_basic_where_keeps_binding_order(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('order_detail')
             ->whereRaw('LOWER(STATION_CALL_LETTERS) = ?', ['kscr'])
             ->where('ORDER_NUMBER', '1471386');
@@ -48,7 +48,7 @@ class QueryGrammarBindingTest extends TestCase
 
     public function test_where_in_uses_placeholders_so_later_raw_bindings_are_not_shifted(): void
     {
-        $query = $this->query()
+        $query = $this->snowflakeQuery()
             ->from('order_detail')
             ->whereIn('ORDER_NUMBER', ['1471386', '1471387'])
             ->whereRaw('LOWER(STATION_CALL_LETTERS) = ?', ['kscr']);
@@ -60,7 +60,7 @@ class QueryGrammarBindingTest extends TestCase
         $this->assertSame(['1471386', '1471387', 'kscr'], $query->getBindings());
     }
 
-    private function query(): Builder
+    private function snowflakeQuery(): Builder
     {
         $connection = Mockery::mock(ConnectionInterface::class);
         $connection->shouldReceive('getName')->andReturn('snowflake_api')->byDefault();

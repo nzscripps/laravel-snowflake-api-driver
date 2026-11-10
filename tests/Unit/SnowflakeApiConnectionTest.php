@@ -2,8 +2,10 @@
 
 namespace Tests\Unit;
 
+use Illuminate\Database\Connection as BaseConnection;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\QueryGrammar;
 use LaravelSnowflakeApi\Flavours\Snowflake\Grammars\SchemaGrammar;
+use LaravelSnowflakeApi\Services\SnowflakeService;
 use LaravelSnowflakeApi\SnowflakeApiConnection;
 use Mockery;
 use Tests\TestCase;
@@ -64,6 +66,29 @@ class SnowflakeApiConnectionTest extends TestCase
         // Verify we got a properly configured grammar back
         $this->assertInstanceOf(SchemaGrammar::class, $grammar);
         $this->assertEquals('', $grammar->getTablePrefix());
+    }
+
+    public function test_query_builder_get_and_cursor_return_case_insensitive_rows(): void
+    {
+        $connection = new class extends SnowflakeApiConnection
+        {
+            public function __construct()
+            {
+                BaseConnection::__construct(new \stdClass, 'test_database');
+            }
+        };
+
+        $service = Mockery::mock(SnowflakeService::class);
+        $service->shouldReceive('executeQueryMapped')->once()->with('select ID from ORDERS', Mockery::type('callable'))
+            ->andReturnUsing(fn ($sql, $map) => [$map(['ID' => 42])]);
+        $service->shouldReceive('cursor')->once()->with('select ID from ORDERS')
+            ->andReturnUsing(function () {
+                yield ['ID' => 42];
+            });
+        $this->setPrivateProperty($connection, 'snowflakeService', $service);
+
+        $this->assertSame(42, $connection->table('orders')->get(['ID'])->first()->id);
+        $this->assertSame(42, $connection->table('orders')->select('ID')->cursor()->first()->id);
     }
 
     public function test_with_table_prefix_on_schema_grammar()

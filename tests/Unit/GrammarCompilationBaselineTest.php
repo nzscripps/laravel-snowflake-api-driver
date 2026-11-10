@@ -74,7 +74,7 @@ class GrammarCompilationBaselineTest extends TestCase
     public function test_compilation_is_unchanged_when_the_flag_is_off(callable $build, string $expected): void
     {
         $this->withEnv('SNOWFLAKE_QUOTE_IDENTIFIERS', null, function () use ($build, $expected) {
-            $this->assertSame($expected, $build($this->query(null))->toSql());
+            $this->assertSame($expected, $build($this->snowflakeQuery(null))->toSql());
         });
     }
 
@@ -83,13 +83,13 @@ class GrammarCompilationBaselineTest extends TestCase
      */
     public function test_compilation_is_unchanged_when_the_flag_is_explicitly_false(callable $build, string $expected): void
     {
-        $this->assertSame($expected, $build($this->query(false))->toSql());
+        $this->assertSame($expected, $build($this->snowflakeQuery(false))->toSql());
     }
 
     /**
      * @param  mixed  $quoteIdentifiers
      */
-    private function query($quoteIdentifiers): Builder
+    private function snowflakeQuery($quoteIdentifiers): Builder
     {
         $connection = Mockery::mock(Connection::class);
         $connection->shouldReceive('getName')->andReturn('snowflake_api')->byDefault();

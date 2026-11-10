@@ -320,8 +320,10 @@ The driver ensures that all date and time values are consistently formatted for 
 
 ## Requirements
 
-- PHP 7.3 or higher
-- Laravel 8.0 or higher
+- PHP 8.0 or higher with the OpenSSL extension.
+- Laravel 8 through 13. Laravel 13 requires PHP 8.3 or higher and is tested on PHP 8.3 and 8.5.
+
+The REST driver returns case-insensitive row objects. Laravel 13 PDO fetch options such as `fetchUsing(PDO::FETCH_ASSOC)` raise an `InvalidArgumentException`. For associative rows, call `toArray()` on each result.
 
 ## License
 
