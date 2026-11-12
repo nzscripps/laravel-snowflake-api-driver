@@ -229,6 +229,27 @@ or may not have executed** — callers must treat it as a possible partial
 success (typically by re-checking state) and must never assume it is safe to
 blindly retry, since the statement's own fate is still unconfirmed.
 
+### Statements that wait at the same time
+
+A read that needs several independent queries can let their Snowflake time overlap:
+
+```php
+use LaravelSnowflakeApi\Services\ConcurrentStatements;
+
+$results = ConcurrentStatements::run([
+    'orders' => fn () => DB::connection('snowflake_api')->select('SELECT ...'),
+    'spots' => fn () => DB::connection('snowflake_api')->select('SELECT ...'),
+]);
+// ['orders' => [...], 'spots' => [...]]
+```
+
+Each task runs in its own Fiber and yields only while the driver waits for a
+statement to finish, so a task that issues several statements still issues them
+in order. Every task runs to its end even if another throws; the first failure
+is then rethrown. Tasks share the objects they close over: state a task keeps
+across a statement must not be touched by the other tasks. Requires PHP 8.1; on
+PHP 8.0 the tasks run one after another.
+
 ## Features
 
 - Uses Snowflake REST API for communication

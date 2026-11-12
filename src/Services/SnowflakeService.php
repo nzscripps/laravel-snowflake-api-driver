@@ -25,6 +25,8 @@ class SnowflakeService
 
     private const CODE_ASYNC = '333334';
 
+    private const STATEMENT_POLL_INTERVAL_MICROSECONDS = 250000;
+
     /**
      * Whether diagnostic logging is enabled
      * Set via SNOWFLAKE_DIAGNOSTIC_LOGGING=true
@@ -416,6 +418,10 @@ class SnowflakeService
         $statementId = $this->postStatement($query);
         $this->debugLog('SnowflakeService: Statement posted', ['statementId' => $statementId]);
 
+        // Under ConcurrentStatements::run() the other tasks post their statements
+        // before this one is polled for the first time; otherwise a no-op.
+        ConcurrentStatements::pause(0);
+
         $result = $this->waitForStatement($statementId);
         $this->fetchRemainingPartitions($statementId, $result);
 
@@ -440,8 +446,7 @@ class SnowflakeService
                 return new Result($this);
             }
 
-            // Reduce blocking time
-            usleep(250000); // 0.25 seconds instead of 1
+            ConcurrentStatements::pause(self::STATEMENT_POLL_INTERVAL_MICROSECONDS);
             $result = $this->getResult($statementId);
         }
 
