@@ -35,7 +35,7 @@ final class ConcurrentStatements
      *
      * Every task runs to its end even when another one throws, so no task is abandoned
      * in the middle of a statement; the first failure (in task order) is then rethrown.
-     * On PHP 8.0, which has no Fibers, the tasks run one after another.
+     * On PHP 8.0, which has no Fibers, the tasks run one after another under the same rule.
      *
      * @template TKey of array-key
      * @template TValue
@@ -45,15 +45,39 @@ final class ConcurrentStatements
      */
     public static function run(array $tasks): array
     {
-        if (count($tasks) < 2 || ! class_exists(Fiber::class)) {
-            $results = [];
-            foreach ($tasks as $key => $task) {
-                $results[$key] = $task();
-            }
+        $results = [];
+        $failures = [];
 
-            return $results;
+        if (count($tasks) < 2 || ! class_exists(Fiber::class)) {
+            foreach ($tasks as $key => $task) {
+                try {
+                    $results[$key] = $task();
+                } catch (Throwable $failure) {
+                    $failures[$key] = $failure;
+                }
+            }
+        } else {
+            [$results, $failures] = self::runInFibers($tasks);
         }
 
+        $ordered = [];
+        foreach ($tasks as $key => $task) {
+            if (isset($failures[$key])) {
+                throw $failures[$key];
+            }
+
+            $ordered[$key] = $results[$key];
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * @param  array<array-key, callable(): mixed>  $tasks
+     * @return array{array<array-key, mixed>, array<array-key, Throwable>} results and failures by task key
+     */
+    private static function runInFibers(array $tasks): array
+    {
         self::$wakeAt ??= new WeakMap;
 
         $pending = [];
@@ -97,18 +121,7 @@ final class ConcurrentStatements
             }
         }
 
-        foreach ($tasks as $key => $task) {
-            if (isset($failures[$key])) {
-                throw $failures[$key];
-            }
-        }
-
-        $ordered = [];
-        foreach ($tasks as $key => $task) {
-            $ordered[$key] = $results[$key];
-        }
-
-        return $ordered;
+        return [$results, $failures];
     }
 
     /**
